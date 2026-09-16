@@ -8,7 +8,8 @@ Status: approved
 Add GitHub Actions CI (formatting, lint, tests, security checks) and a
 manually triggered release that tags the repository, publishes binaries on
 a GitHub Release, and makes the module available on the Go module proxy and
-pkg.go.dev.
+pkg.go.dev. Users install the binary from GitHub Releases with a one-line
+script, or with `go install`.
 
 ## Context
 
@@ -38,11 +39,13 @@ pkg.go.dev.
    3. else `dev`.
 
    The resolved value feeds `serverInfo.version` and the `User-Agent`.
+   A `--version` flag prints it and exits (used by the install smoke test).
    Covered by a unit test on the resolution function.
 
 ## Versioning
 
 - Tags are `vX.Y.Z`. No tag yet means the base is `v0.0.0`.
+- The first release is `v0.1.0` (dispatch with `minor`).
 - Major versions stay at 0 or 1. A v2+ module requires a `/v2` path
   suffix, so the release workflow refuses any bump that yields `v2.0.0` or
   higher. Moving to v2 is a separate, deliberate change.
@@ -62,6 +65,7 @@ pkg.go.dev.
 .goreleaser.yaml
 .gitignore
 LICENSE
+install.sh
 ```
 
 ## `ci.yml`
@@ -78,6 +82,7 @@ Permissions: `contents: read`. Go version from `go.mod`
 | `vuln` | `govulncheck ./...` |
 | `secrets` | `gitleaks` CLI, full history (`fetch-depth: 0`) |
 | `build` | `go build ./...` |
+| `shellcheck` | `shellcheck install.sh` |
 
 `test_mcp.py` is not run: it needs a live Xalantis API key.
 
@@ -112,7 +117,12 @@ release  needs: gate
   5. goreleaser release --clean  (GITHUB_TOKEN)
   6. GOPROXY=proxy.golang.org go list -m github.com/martialpmt/xalantis-mcp-go@vX.Y.Z
   7. write a job summary: version, release URL, pkg.go.dev URL,
-     go install command
+     install commands
+install-smoke  needs: release
+         matrix: ubuntu-latest, macos-latest
+  1. checkout the new tag
+  2. VERSION=vX.Y.Z INSTALL_DIR=$RUNNER_TEMP/bin sh install.sh
+  3. assert `xalantis-projects-mcp --version` prints vX.Y.Z
 ```
 
 Dispatching from any branch other than `main` skips `release`; the
@@ -131,9 +141,48 @@ Tag commits use the `github-actions[bot]` identity.
   `-trimpath`, `-ldflags "-s -w -X main.version={{.Version}}"`.
 - Targets: `linux`, `darwin`, `windows` × `amd64`, `arm64`.
 - Archives: `tar.gz`, `zip` on Windows; include `README.md` and `LICENSE`.
-- `checksums.txt` (SHA-256).
+  Name template without the version:
+  `xalantis-projects-mcp_{{.Os}}_{{.Arch}}`, so
+  `releases/latest/download/<asset>` always resolves to the newest release.
+- `checksums.txt` (SHA-256), same fixed name.
 - Changelog from commits, grouped by Conventional Commit type; `docs:`,
   `test:`, `chore:` excluded.
+
+## `install.sh`
+
+POSIX `sh` (`set -eu`), used as:
+
+```
+curl -fsSL https://raw.githubusercontent.com/martialpmt/xalantis-mcp-go/main/install.sh | sh
+```
+
+Settings (environment variables):
+
+| Variable | Default | Role |
+|---|---|---|
+| `VERSION` | `latest` | Tag to install (`vX.Y.Z`) |
+| `INSTALL_DIR` | `$HOME/.local/bin` | Destination, created if missing |
+| `BASE_URL` | `https://github.com/martialpmt/xalantis-mcp-go/releases` | Override for local testing only |
+
+Steps:
+1. Detect OS (`uname -s`: Darwin → `darwin`, Linux → `linux`) and
+   architecture (`uname -m`: `x86_64`/`amd64` → `amd64`,
+   `arm64`/`aarch64` → `arm64`). Anything else exits with an error that
+   points to the Releases page.
+2. Download URL: `$BASE_URL/latest/download/<asset>` for `latest`, else
+   `$BASE_URL/download/$VERSION/<asset>`. Uses `curl -fsSL`, falls back to
+   `wget -qO`; neither → error.
+3. Download the archive and `checksums.txt` into a `mktemp -d` directory
+   (removed by `trap` on exit).
+4. Verify SHA-256 with `sha256sum`, else `shasum -a 256`; mismatch or
+   missing entry → error, nothing installed.
+5. Extract only the binary and install it with mode `0755` into
+   `$INSTALL_DIR`.
+6. Print the installed version (`--version`). Warn if `$INSTALL_DIR` is not
+   in `PATH`.
+
+Windows is not supported by the script; the README documents the manual
+zip download.
 
 ## `dependabot.yml`
 
@@ -148,12 +197,17 @@ Weekly updates for `github-actions` and `gomod`.
   `security-events: write`.
 - Tool versions (golangci-lint, govulncheck, gitleaks, goreleaser) are
   pinned.
+- `install.sh` never uses `sudo` and always verifies the checksum before
+  installing.
 
 ## README
 
-Add an installation section (`go install
-github.com/martialpmt/xalantis-mcp-go/cmd/xalantis-projects-mcp@latest`,
-or download from GitHub Releases) and CI / pkg.go.dev badges. Written in
+Add an installation section, in this order: the `install.sh` one-liner
+(with `VERSION` / `INSTALL_DIR`), manual download from GitHub Releases
+(including Windows), and `go install
+github.com/martialpmt/xalantis-mcp-go/cmd/xalantis-projects-mcp@latest`.
+Update the MCP client configuration example to the installed binary path.
+Add CI and pkg.go.dev badges. Written in
 French, like the rest of the README.
 
 ## Verification
@@ -163,16 +217,22 @@ Local, before pushing:
 - `actionlint` passes on all workflows.
 - `golangci-lint run` passes (fix or annotate findings).
 - `goreleaser check` and `goreleaser release --snapshot --clean` produce
-  6 archives and `checksums.txt`; the darwin/arm64 binary reports the
-  snapshot version.
+  6 archives and `checksums.txt` with version-free names; the darwin/arm64
+  binary reports the snapshot version with `--version`.
+- `shellcheck install.sh` passes. `install.sh` run with `BASE_URL` pointed
+  at a local copy of the snapshot `dist/` (served with
+  `python3 -m http.server`) installs into a temp dir, and a corrupted
+  archive is rejected.
 
 After pushing (user):
 - CI and CodeQL are green on `main`.
 - Dispatch `release` with `minor` → `v0.1.0` tag, GitHub Release with
-  assets, module visible on pkg.go.dev, `go install …@v0.1.0` works.
+  assets, `install-smoke` green, module visible on pkg.go.dev,
+  `go install …@v0.1.0` works.
 
 ## Out of scope
 
 - Docker images, Homebrew tap, code signing / SLSA provenance.
+- A Windows install script.
 - Running `test_mcp.py` in CI.
 - Branch protection settings (configured by hand in GitHub).
