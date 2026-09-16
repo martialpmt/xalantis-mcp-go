@@ -9,6 +9,12 @@ de services. Il complète le connecteur Xalantis existant.
 > de création, de modification et de suppression. Ce que Claude peut faire
 > dépend uniquement des scopes de la clé API. Pour un usage en lecture seule,
 > utilisez une clé qui n'a que des scopes `:read`.
+>
+> **Fichiers locaux.** `xalantis_call_operation` peut envoyer n'importe quel
+> fichier local lisible par votre compte et écrire là où `save_to` l'indique.
+> Un contenu malveillant (par ex. le texte d'un ticket) pourrait pousser
+> Claude à joindre un fichier sensible (clés SSH, identifiants…). Vérifiez
+> chaque appel qui contient `files` ou `save_to` avant de l'autoriser.
 
 ## Outils exposés (10)
 
@@ -58,8 +64,11 @@ l'outil renvoie l'erreur.
 
 ## Fichiers
 
-- **Envoi** : `files` associe un champ à un chemin local (ou une liste de
-  chemins), par ex. `{"files": ["/Users/moi/Documents/cr.pdf"]}`.
+- **Envoi** : `files` est un objet qui associe le nom du champ fichier
+  (indiqué par `xalantis_describe_operation`, dans `body.file_fields`) à un
+  chemin local ou à une liste de chemins. Par ex. pour les documents d'un
+  projet : `{"files": {"files": ["/Users/moi/Documents/cr.pdf"]}}` ; pour un
+  import : `{"files": {"file": "/Users/moi/Documents/taches.csv"}}`.
 - **Réception** : un fichier reçu est enregistré dans `~/Downloads` (ou à
   `save_to`). Un fichier existant n'est jamais écrasé : ` (1)`, ` (2)`… sont
   ajoutés au nom. L'outil renvoie le chemin, la taille et le type.

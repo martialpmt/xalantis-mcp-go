@@ -261,3 +261,51 @@ func TestCallEmptyAndTextResponses(t *testing.T) {
 		t.Errorf("CSV : %v %q", err, out)
 	}
 }
+
+func TestSaveToAppliesToText(t *testing.T) {
+	rec := newRecorder(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Write([]byte("a,b\n1,2\n"))
+	})
+	dir := t.TempDir()
+	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	target := filepath.Join(dir, "export.csv")
+	in := map[string]any{
+		"operation_id": "get_projects_By_projectUuid_exports",
+		"path_params":  map[string]any{"projectUuid": "p"},
+		"query":        map[string]any{"format": "csv"},
+		"save_to":      target,
+	}
+
+	out, err := call.Handler(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res map[string]any
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("sortie %s : %v", out, err)
+	}
+	if res["saved_to"] != target {
+		t.Errorf("saved_to = %v, attendu %s", res["saved_to"], target)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "a,b\n1,2\n" {
+		t.Errorf("contenu = %q", data)
+	}
+
+	out2, err := call.Handler(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res2 map[string]any
+	if err := json.Unmarshal([]byte(out2), &res2); err != nil {
+		t.Fatalf("sortie %s : %v", out2, err)
+	}
+	wantSecond := filepath.Join(dir, "export (1).csv")
+	if res2["saved_to"] != wantSecond {
+		t.Errorf("saved_to (2e appel) = %v, attendu %s", res2["saved_to"], wantSecond)
+	}
+}

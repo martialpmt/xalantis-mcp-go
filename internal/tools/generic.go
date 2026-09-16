@@ -81,7 +81,7 @@ func GenericTools(c *xalantis.Client, cat *openapi.Catalog, downloadDir string) 
 				"headers":     map[string]any{"type": "object", "description": "En-têtes déclarés par l'opération (Idempotency-Key, If-Match)."},
 				"body":        map[string]any{"type": "object", "description": "Corps JSON, ou champs texte pour une opération multipart."},
 				"files":       map[string]any{"type": "object", "description": "Opérations multipart : champ → chemin local ou liste de chemins."},
-				"save_to":     prop("string", "Chemin local où enregistrer un fichier reçu (défaut : dossier Téléchargements)."),
+				"save_to":     prop("string", "Chemin local où enregistrer la réponse (fichier ou texte, ex. un export CSV). Défaut : les fichiers reçus vont dans le dossier Téléchargements, le texte est renvoyé directement."),
 			})),
 			Handler: func(raw map[string]any) (string, error) {
 				return callOperation(c, cat, downloadDir, args(raw))
@@ -175,13 +175,14 @@ func callOperation(c *xalantis.Client, cat *openapi.Catalog, downloadDir string,
 	if len(resp.Body) == 0 {
 		return fmt.Sprintf("Succès (HTTP %d), réponse vide.", resp.Status), nil
 	}
-	if isText(resp.Header.Get("Content-Type")) {
+	saveTo := a.str("save_to")
+	if saveTo == "" && isText(resp.Header.Get("Content-Type")) {
 		if len(resp.Body) > MaxTextBytes {
 			return "", fmt.Errorf("réponse texte trop volumineuse (%d octets) : affinez les filtres ou paginez", len(resp.Body))
 		}
 		return string(resp.Body), nil
 	}
-	return saveDownload(downloadDir, a.str("save_to"), op.ID, resp)
+	return saveDownload(downloadDir, saveTo, op.ID, resp)
 }
 
 var pathParamPattern = regexp.MustCompile(`\{([^}]+)\}`)
