@@ -51,6 +51,10 @@ func main() {
 		}
 		filesDir = filepath.Join(home, "Downloads", "xalantis")
 	}
+	if filesDir, err = filepath.Abs(filesDir); err != nil {
+		fmt.Fprintln(os.Stderr, "chemin de XALANTIS_FILES_DIR invalide :", err)
+		os.Exit(1)
+	}
 	if err := os.MkdirAll(filesDir, 0o700); err != nil {
 		fmt.Fprintln(os.Stderr, "création du dossier autorisé impossible ("+filesDir+") :", err)
 		os.Exit(1)

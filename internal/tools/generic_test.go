@@ -341,6 +341,16 @@ func uploadCall(t *testing.T, rec *recorder, dir, path string) error {
 	return err
 }
 
+// assertOutsideFolder vérifie que err rejette un chemin hors du dossier
+// autorisé, avec le message attendu (et non un message de type « fichier
+// introuvable », qui révélerait l'existence du chemin visé).
+func assertOutsideFolder(t *testing.T, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "hors du dossier autorisé") {
+		t.Fatalf("attendu « hors du dossier autorisé », obtenu : %v", err)
+	}
+}
+
 func TestCallUploadOutsideFolderRejected(t *testing.T) {
 	rec := newRecorder(t, nil)
 	dir := t.TempDir()
@@ -348,9 +358,17 @@ func TestCallUploadOutsideFolderRejected(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := uploadCall(t, rec, dir, outside); err == nil {
-		t.Fatal("chemin absolu hors du dossier : erreur attendue")
+	assertOutsideFolder(t, uploadCall(t, rec, dir, outside))
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
 	}
+}
+
+func TestCallUploadOutsideFolderNonexistentHidesExistence(t *testing.T) {
+	rec := newRecorder(t, nil)
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "does-not-exist.txt")
+	assertOutsideFolder(t, uploadCall(t, rec, dir, outside))
 	if len(rec.requests) != 0 {
 		t.Errorf("%d appels API, attendu 0", len(rec.requests))
 	}
@@ -364,9 +382,7 @@ func TestCallUploadParentTraversalRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Remove(outside) })
-	if err := uploadCall(t, rec, dir, "../evil.txt"); err == nil {
-		t.Fatal("../ hors du dossier : erreur attendue")
-	}
+	assertOutsideFolder(t, uploadCall(t, rec, dir, "../evil.txt"))
 	if len(rec.requests) != 0 {
 		t.Errorf("%d appels API, attendu 0", len(rec.requests))
 	}
@@ -384,9 +400,7 @@ func TestCallUploadSymlinkEscapeRejected(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := uploadCall(t, rec, dir, link); err == nil {
-		t.Fatal("lien symbolique vers l'extérieur : erreur attendue")
-	}
+	assertOutsideFolder(t, uploadCall(t, rec, dir, link))
 	if len(rec.requests) != 0 {
 		t.Errorf("%d appels API, attendu 0", len(rec.requests))
 	}
@@ -426,9 +440,24 @@ func TestSaveToOutsideFolderRejected(t *testing.T) {
 		"query":        map[string]any{"format": "csv"},
 		"save_to":      outside,
 	})
-	if err == nil {
-		t.Fatal("save_to hors du dossier : erreur attendue")
+	assertOutsideFolder(t, err)
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
 	}
+}
+
+func TestSaveToOutsideFolderNonexistentParentHidesExistence(t *testing.T) {
+	rec := newRecorder(t, nil)
+	dir := t.TempDir()
+	outsideParent := filepath.Join(t.TempDir(), "does-not-exist-dir")
+	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	_, err := call.Handler(map[string]any{
+		"operation_id": "get_projects_By_projectUuid_exports",
+		"path_params":  map[string]any{"projectUuid": "p"},
+		"query":        map[string]any{"format": "csv"},
+		"save_to":      filepath.Join(outsideParent, "export.csv"),
+	})
+	assertOutsideFolder(t, err)
 	if len(rec.requests) != 0 {
 		t.Errorf("%d appels API, attendu 0", len(rec.requests))
 	}
@@ -449,9 +478,7 @@ func TestSaveToSymlinkParentEscapeRejected(t *testing.T) {
 		"query":        map[string]any{"format": "csv"},
 		"save_to":      filepath.Join(link, "export.csv"),
 	})
-	if err == nil {
-		t.Fatal("dossier parent symbolique vers l'extérieur : erreur attendue")
-	}
+	assertOutsideFolder(t, err)
 	if len(rec.requests) != 0 {
 		t.Errorf("%d appels API, attendu 0", len(rec.requests))
 	}
@@ -503,8 +530,8 @@ func TestSaveToMissingParentDir(t *testing.T) {
 		"query":        map[string]any{"format": "csv"},
 		"save_to":      "absent/x.csv",
 	})
-	if err == nil {
-		t.Fatal("dossier parent manquant : erreur attendue")
+	if err == nil || !strings.Contains(err.Error(), "introuvable") {
+		t.Fatalf("attendu « introuvable », obtenu : %v", err)
 	}
 	if len(rec.requests) != 0 {
 		t.Errorf("%d appels API, attendu 0", len(rec.requests))
