@@ -3,8 +3,10 @@
 //
 // Configuration par variables d'environnement :
 //
-//	XALANTIS_API_KEY  (obligatoire) — clé API tenant ; les scopes décident des opérations permises
-//	XALANTIS_BASE_URL (optionnel)   — défaut : https://xalantis.com
+//	XALANTIS_API_KEY   (obligatoire) — clé API tenant ; les scopes décident des opérations permises
+//	XALANTIS_BASE_URL  (optionnel)   — défaut : https://xalantis.com
+//	XALANTIS_FILES_DIR (optionnel)   — dossier autorisé pour les fichiers locaux (envoi, save_to,
+//	                                    téléchargements) ; défaut : <dossier personnel>/Downloads/xalantis
 //
 // Compilation : go build -o xalantis-projects-mcp ./cmd/xalantis-projects-mcp
 package main
@@ -39,11 +41,24 @@ func main() {
 		APIKey:    os.Getenv("XALANTIS_API_KEY"),
 		UserAgent: serverName + "/" + serverVersion,
 	})
-	home, _ := os.UserHomeDir()
+
+	filesDir := os.Getenv("XALANTIS_FILES_DIR")
+	if filesDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "dossier personnel introuvable, définissez XALANTIS_FILES_DIR :", err)
+			os.Exit(1)
+		}
+		filesDir = filepath.Join(home, "Downloads", "xalantis")
+	}
+	if err := os.MkdirAll(filesDir, 0o700); err != nil {
+		fmt.Fprintln(os.Stderr, "création du dossier autorisé impossible ("+filesDir+") :", err)
+		os.Exit(1)
+	}
 
 	srv := mcp.NewServer(serverName, serverVersion, instructions)
 	srv.Register(tools.ProjectTools(client)...)
-	srv.Register(tools.GenericTools(client, cat, filepath.Join(home, "Downloads"))...)
+	srv.Register(tools.GenericTools(client, cat, filesDir)...)
 	if err := srv.Serve(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

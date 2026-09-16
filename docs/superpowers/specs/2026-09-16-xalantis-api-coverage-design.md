@@ -224,9 +224,9 @@ Facts found in the OpenAPI file changed these details:
    (only in responses). The resolver is kept as a safeguard.
 10. `save_to` applies to every non-empty response, text included (e.g. CSV
     exports); without `save_to`, text is returned and other content is saved
-    to the download folder.
-11. Security note: uploads and `save_to` accept any local path, so content
-    read from the API (e.g. ticket text) could steer the model into
-    uploading a sensitive file. The README warns users to check calls with
-    `files` or `save_to`. Restricting these paths to a directory is left
-    for a later decision.
+    to that folder.
+11. Local file access is restricted to one folder, `XALANTIS_FILES_DIR`
+    (default `~/Downloads/xalantis`, created at startup). Uploads and
+    `save_to` must resolve inside it after following symlinks; relative
+    paths are relative to it; default downloads go there. Decided by the
+    user to mitigate prompt-injection file exfiltration.

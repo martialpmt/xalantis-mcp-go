@@ -29,8 +29,9 @@ func toJSON(v any) (string, error) {
 }
 
 // GenericTools renvoie les outils de recherche, description et appel des
-// opérations du catalogue. downloadDir reçoit les fichiers téléchargés sans save_to.
-func GenericTools(c *xalantis.Client, cat *openapi.Catalog, downloadDir string) []mcp.Tool {
+// opérations du catalogue. filesDir est le seul dossier dans lequel le
+// serveur lit (envoi) et écrit (save_to, téléchargements) des fichiers.
+func GenericTools(c *xalantis.Client, cat *openapi.Catalog, filesDir string) []mcp.Tool {
 	areas := make([]any, len(openapi.Areas))
 	for i, a := range openapi.Areas {
 		areas[i] = a
@@ -80,17 +81,17 @@ func GenericTools(c *xalantis.Client, cat *openapi.Catalog, downloadDir string) 
 				"query":       map[string]any{"type": "object", "description": "Paramètres de requête. Tableau = valeurs répétées (nom[]), objet = nom[clé]."},
 				"headers":     map[string]any{"type": "object", "description": "En-têtes déclarés par l'opération (Idempotency-Key, If-Match)."},
 				"body":        map[string]any{"type": "object", "description": "Corps JSON, ou champs texte pour une opération multipart."},
-				"files":       map[string]any{"type": "object", "description": "Opérations multipart : champ → chemin local ou liste de chemins."},
-				"save_to":     prop("string", "Chemin local où enregistrer la réponse (fichier ou texte, ex. un export CSV). Défaut : les fichiers reçus vont dans le dossier Téléchargements, le texte est renvoyé directement."),
+				"files":       map[string]any{"type": "object", "description": "Opérations multipart : champ → chemin ou liste de chemins, dans le dossier autorisé (XALANTIS_FILES_DIR ; chemin relatif = relatif à ce dossier)."},
+				"save_to":     prop("string", "Chemin où enregistrer la réponse (fichier ou texte, ex. un export CSV), dans le dossier autorisé (XALANTIS_FILES_DIR ; chemin relatif = relatif à ce dossier). Sans save_to, les fichiers reçus sont enregistrés dans ce dossier et le texte est renvoyé directement."),
 			})),
 			Handler: func(raw map[string]any) (string, error) {
-				return callOperation(c, cat, downloadDir, args(raw))
+				return callOperation(c, cat, filesDir, args(raw))
 			},
 		},
 	}
 }
 
-func callOperation(c *xalantis.Client, cat *openapi.Catalog, downloadDir string, a args) (string, error) {
+func callOperation(c *xalantis.Client, cat *openapi.Catalog, filesDir string, a args) (string, error) {
 	id := a.str("operation_id")
 	op, ok := cat.Get(id)
 	if !ok {
@@ -129,6 +130,17 @@ func callOperation(c *xalantis.Client, cat *openapi.Catalog, downloadDir string,
 	if err != nil {
 		return "", err
 	}
+	// save_to est résolu et validé avant tout appel HTTP, comme les autres
+	// entrées : un chemin hors du dossier autorisé ne doit jamais déclencher
+	// de requête à l'API.
+	saveTo := a.str("save_to")
+	var saveTarget string
+	if saveTo != "" {
+		saveTarget, err = resolveSaveTo(filesDir, saveTo)
+		if err != nil {
+			return "", err
+		}
+	}
 
 	var reader io.Reader
 	contentType := ""
@@ -140,7 +152,7 @@ func callOperation(c *xalantis.Client, cat *openapi.Catalog, downloadDir string,
 				return "", err
 			}
 		}
-		files, err := buildFiles(op, fileArgs)
+		files, err := buildFiles(op, filesDir, fileArgs)
 		if err != nil {
 			return "", err
 		}
@@ -175,14 +187,13 @@ func callOperation(c *xalantis.Client, cat *openapi.Catalog, downloadDir string,
 	if len(resp.Body) == 0 {
 		return fmt.Sprintf("Succès (HTTP %d), réponse vide.", resp.Status), nil
 	}
-	saveTo := a.str("save_to")
 	if saveTo == "" && isText(resp.Header.Get("Content-Type")) {
 		if len(resp.Body) > MaxTextBytes {
 			return "", fmt.Errorf("réponse texte trop volumineuse (%d octets) : affinez les filtres ou paginez", len(resp.Body))
 		}
 		return string(resp.Body), nil
 	}
-	return saveDownload(downloadDir, saveTo, op.ID, resp)
+	return saveDownload(filesDir, saveTarget, op.ID, resp)
 }
 
 var pathParamPattern = regexp.MustCompile(`\{([^}]+)\}`)
@@ -274,7 +285,7 @@ func buildHeaders(op *openapi.Operation, values map[string]any) (map[string]stri
 	return h, nil
 }
 
-func buildFiles(op *openapi.Operation, values map[string]any) ([]xalantis.FilePart, error) {
+func buildFiles(op *openapi.Operation, filesDir string, values map[string]any) ([]xalantis.FilePart, error) {
 	names := make([]string, 0, len(values))
 	for k := range values {
 		names = append(names, k)
@@ -314,11 +325,11 @@ func buildFiles(op *openapi.Operation, values map[string]any) ([]xalantis.FilePa
 			key += "[]"
 		}
 		for _, p := range paths {
-			info, err := os.Stat(p)
-			if err != nil || !info.Mode().IsRegular() {
-				return nil, fmt.Errorf("fichier introuvable ou invalide : %s", p)
+			resolved, err := resolveUpload(filesDir, p)
+			if err != nil {
+				return nil, err
 			}
-			parts = append(parts, xalantis.FilePart{Field: key, Path: p})
+			parts = append(parts, xalantis.FilePart{Field: key, Path: resolved})
 		}
 	}
 	return parts, nil
@@ -365,14 +376,16 @@ func createUnique(path string) (*os.File, string, error) {
 	return nil, "", fmt.Errorf("aucun nom libre pour %s", path)
 }
 
-func saveDownload(downloadDir, saveTo, opID string, resp *xalantis.Response) (string, error) {
-	target := saveTo
+// saveDownload écrit resp.Body dans target, ou, si target est vide, dans
+// filesDir sous le nom déduit de Content-Disposition (ou de opID). target,
+// quand il est fourni, a déjà été validé par resolveSaveTo.
+func saveDownload(filesDir, target, opID string, resp *xalantis.Response) (string, error) {
 	if target == "" {
 		name := safeFilename(resp.Header.Get("Content-Disposition"))
 		if name == "" {
 			name = opID + ".bin"
 		}
-		target = filepath.Join(downloadDir, name)
+		target = filepath.Join(filesDir, name)
 	}
 	f, path, err := createUnique(target)
 	if err != nil {

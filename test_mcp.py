@@ -105,7 +105,6 @@ msgs = [
 stdin_data = "".join(json.dumps(m) + "\n" for m in msgs)
 
 home = tempfile.mkdtemp()
-os.mkdir(os.path.join(home, "Downloads"))
 proc = subprocess.run(
     ["./xalantis-projects-mcp"],
     input=stdin_data, capture_output=True, text=True, timeout=30,
@@ -151,11 +150,12 @@ check(r13["data"]["uuid"] == "tk-1" and POSTS and POSTS[0] == {
     "path": "/api/v1/projects/p-1/tasks", "idem": "idem-42", "type": "application/json",
     "body": {"title": "Nouvelle tâche"}}, "call_operation POST JSON")
 r14 = json.loads(resp[14]["result"]["content"][0]["text"])
-saved = os.path.join(home, "Downloads", "rapport.pdf")
+saved = os.path.join(home, "Downloads", "xalantis", "rapport.pdf")
 check(r14["saved_to"] == saved and open(saved, "rb").read() == b"%PDF-test", "call_operation téléchargement")
 check(resp[15]["result"]["isError"] and "Idempotency-Key" in resp[15]["result"]["content"][0]["text"], "Idempotency-Key requise")
 check(all(a == "Bearer sk_live_test" for _, a in REQUESTS), "header Authorization sur chaque appel")
 check(len(REQUESTS) == 5, f"{len(REQUESTS)} appels API (les entrées invalides n'atteignent pas l'API)")
+check(os.path.isdir(os.path.join(home, "Downloads", "xalantis")), "dossier XALANTIS_FILES_DIR créé au démarrage")
 check(proc.stderr.strip() == "", "stderr vide")
 
 srv.shutdown()

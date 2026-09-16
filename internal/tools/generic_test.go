@@ -26,6 +26,19 @@ func genericTool(t *testing.T, rec *recorder, dir, name string) mcp.Tool {
 	return find(t, GenericTools(rec.client(), catalog(t), dir), name)
 }
 
+// realDir résout dir via les liens symboliques, comme le fait la validation
+// des chemins. Sur macOS, t.TempDir() vit sous /var/folders/…, lui-même un
+// lien vers /private/var/folders/… : comparer les chemins résolus évite un
+// faux échec.
+func realDir(t *testing.T, dir string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
 func TestSearchTool(t *testing.T) {
 	rec := newRecorder(t, nil)
 	search := genericTool(t, rec, t.TempDir(), "xalantis_search_operations")
@@ -235,10 +248,13 @@ func TestDownloadMaliciousFilenameStaysInDir(t *testing.T) {
 func TestDownloadSaveTo(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "sous", "x.pdf")
-	os.MkdirAll(filepath.Dir(target), 0o755)
-	res := download(t, downloadServer(t, ""), t.TempDir(), map[string]any{"save_to": target})
-	if res["saved_to"] != target {
-		t.Errorf("save_to : %v", res["saved_to"])
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res := download(t, downloadServer(t, ""), dir, map[string]any{"save_to": target})
+	want := filepath.Join(realDir(t, dir), "sous", "x.pdf")
+	if res["saved_to"] != want {
+		t.Errorf("save_to : %v, attendu %s", res["saved_to"], want)
 	}
 }
 
@@ -285,8 +301,9 @@ func TestSaveToAppliesToText(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatalf("sortie %s : %v", out, err)
 	}
-	if res["saved_to"] != target {
-		t.Errorf("saved_to = %v, attendu %s", res["saved_to"], target)
+	wantFirst := filepath.Join(realDir(t, dir), "export.csv")
+	if res["saved_to"] != wantFirst {
+		t.Errorf("saved_to = %v, attendu %s", res["saved_to"], wantFirst)
 	}
 	data, err := os.ReadFile(target)
 	if err != nil {
@@ -304,8 +321,192 @@ func TestSaveToAppliesToText(t *testing.T) {
 	if err := json.Unmarshal([]byte(out2), &res2); err != nil {
 		t.Fatalf("sortie %s : %v", out2, err)
 	}
-	wantSecond := filepath.Join(dir, "export (1).csv")
+	wantSecond := filepath.Join(realDir(t, dir), "export (1).csv")
 	if res2["saved_to"] != wantSecond {
 		t.Errorf("saved_to (2e appel) = %v, attendu %s", res2["saved_to"], wantSecond)
+	}
+}
+
+// uploadCall appelle post_projects_By_projectUuid_documents avec le champ
+// fichier "files" pointant sur path, dans le dossier dir.
+func uploadCall(t *testing.T, rec *recorder, dir, path string) error {
+	t.Helper()
+	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	_, err := call.Handler(map[string]any{
+		"operation_id": "post_projects_By_projectUuid_documents",
+		"path_params":  map[string]any{"projectUuid": "p"},
+		"headers":      map[string]any{"Idempotency-Key": "k"},
+		"files":        map[string]any{"files": path},
+	})
+	return err
+}
+
+func TestCallUploadOutsideFolderRejected(t *testing.T) {
+	rec := newRecorder(t, nil)
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := uploadCall(t, rec, dir, outside); err == nil {
+		t.Fatal("chemin absolu hors du dossier : erreur attendue")
+	}
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
+	}
+}
+
+func TestCallUploadParentTraversalRejected(t *testing.T) {
+	rec := newRecorder(t, nil)
+	dir := t.TempDir()
+	outside := filepath.Join(filepath.Dir(dir), "evil.txt")
+	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(outside) })
+	if err := uploadCall(t, rec, dir, "../evil.txt"); err == nil {
+		t.Fatal("../ hors du dossier : erreur attendue")
+	}
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
+	}
+}
+
+func TestCallUploadSymlinkEscapeRejected(t *testing.T) {
+	rec := newRecorder(t, nil)
+	dir := t.TempDir()
+	outsideDir := t.TempDir()
+	target := filepath.Join(outsideDir, "secret.txt")
+	if err := os.WriteFile(target, []byte("s"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := uploadCall(t, rec, dir, link); err == nil {
+		t.Fatal("lien symbolique vers l'extérieur : erreur attendue")
+	}
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
+	}
+}
+
+func TestCallUploadRelativePathAccepted(t *testing.T) {
+	rec := newRecorder(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("multipart: %v", err)
+		}
+		if n := len(r.MultipartForm.File["files[]"]); n != 1 {
+			t.Errorf("%d fichiers sous files[]", n)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"success":true}`))
+	})
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.pdf"), []byte("A"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := uploadCall(t, rec, dir, "a.pdf"); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.requests) != 1 {
+		t.Fatalf("%d appels", len(rec.requests))
+	}
+}
+
+func TestSaveToOutsideFolderRejected(t *testing.T) {
+	rec := newRecorder(t, nil)
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "export.csv")
+	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	_, err := call.Handler(map[string]any{
+		"operation_id": "get_projects_By_projectUuid_exports",
+		"path_params":  map[string]any{"projectUuid": "p"},
+		"query":        map[string]any{"format": "csv"},
+		"save_to":      outside,
+	})
+	if err == nil {
+		t.Fatal("save_to hors du dossier : erreur attendue")
+	}
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
+	}
+}
+
+func TestSaveToSymlinkParentEscapeRejected(t *testing.T) {
+	rec := newRecorder(t, nil)
+	dir := t.TempDir()
+	outsideDir := t.TempDir()
+	link := filepath.Join(dir, "out")
+	if err := os.Symlink(outsideDir, link); err != nil {
+		t.Fatal(err)
+	}
+	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	_, err := call.Handler(map[string]any{
+		"operation_id": "get_projects_By_projectUuid_exports",
+		"path_params":  map[string]any{"projectUuid": "p"},
+		"query":        map[string]any{"format": "csv"},
+		"save_to":      filepath.Join(link, "export.csv"),
+	})
+	if err == nil {
+		t.Fatal("dossier parent symbolique vers l'extérieur : erreur attendue")
+	}
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
+	}
+}
+
+func TestSaveToRelativeAccepted(t *testing.T) {
+	rec := newRecorder(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Write([]byte("a,b\n1,2\n"))
+	})
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "sous"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	out, err := call.Handler(map[string]any{
+		"operation_id": "get_projects_By_projectUuid_exports",
+		"path_params":  map[string]any{"projectUuid": "p"},
+		"query":        map[string]any{"format": "csv"},
+		"save_to":      "sous/x.csv",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res map[string]any
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("sortie %s : %v", out, err)
+	}
+	want := filepath.Join(realDir(t, filepath.Join(dir, "sous")), "x.csv")
+	if res["saved_to"] != want {
+		t.Errorf("saved_to = %v, attendu %s", res["saved_to"], want)
+	}
+	data, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "a,b\n1,2\n" {
+		t.Errorf("contenu = %q", data)
+	}
+}
+
+func TestSaveToMissingParentDir(t *testing.T) {
+	rec := newRecorder(t, nil)
+	dir := t.TempDir()
+	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	_, err := call.Handler(map[string]any{
+		"operation_id": "get_projects_By_projectUuid_exports",
+		"path_params":  map[string]any{"projectUuid": "p"},
+		"query":        map[string]any{"format": "csv"},
+		"save_to":      "absent/x.csv",
+	})
+	if err == nil {
+		t.Fatal("dossier parent manquant : erreur attendue")
+	}
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
 	}
 }

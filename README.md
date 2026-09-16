@@ -10,11 +10,10 @@ de services. Il complète le connecteur Xalantis existant.
 > dépend uniquement des scopes de la clé API. Pour un usage en lecture seule,
 > utilisez une clé qui n'a que des scopes `:read`.
 >
-> **Fichiers locaux.** `xalantis_call_operation` peut envoyer n'importe quel
-> fichier local lisible par votre compte et écrire là où `save_to` l'indique.
-> Un contenu malveillant (par ex. le texte d'un ticket) pourrait pousser
-> Claude à joindre un fichier sensible (clés SSH, identifiants…). Vérifiez
-> chaque appel qui contient `files` ou `save_to` avant de l'autoriser.
+> **Fichiers locaux.** Le serveur ne lit et n'écrit des fichiers que dans un
+> seul dossier : `XALANTIS_FILES_DIR` (défaut `~/Downloads/xalantis`, créé
+> au démarrage). Pour envoyer un fichier, copiez-le d'abord dans ce dossier.
+> Les liens symboliques qui sortent du dossier sont refusés.
 
 ## Outils exposés (10)
 
@@ -66,12 +65,15 @@ l'outil renvoie l'erreur.
 
 - **Envoi** : `files` est un objet qui associe le nom du champ fichier
   (indiqué par `xalantis_describe_operation`, dans `body.file_fields`) à un
-  chemin local ou à une liste de chemins. Par ex. pour les documents d'un
-  projet : `{"files": {"files": ["/Users/moi/Documents/cr.pdf"]}}` ; pour un
-  import : `{"files": {"file": "/Users/moi/Documents/taches.csv"}}`.
-- **Réception** : un fichier reçu est enregistré dans `~/Downloads` (ou à
-  `save_to`). Un fichier existant n'est jamais écrasé : ` (1)`, ` (2)`… sont
-  ajoutés au nom. L'outil renvoie le chemin, la taille et le type.
+  chemin ou à une liste de chemins, qui doivent rester dans le dossier
+  autorisé (`XALANTIS_FILES_DIR`) ; un chemin relatif est relatif à ce
+  dossier. Par ex. pour les documents d'un projet :
+  `{"files": {"files": ["cr.pdf"]}}` ; pour un import :
+  `{"files": {"file": "taches.csv"}}`.
+- **Réception** : un fichier reçu est enregistré dans ce même dossier par
+  défaut (ou à `save_to`, qui doit aussi y rester). Un fichier existant
+  n'est jamais écrasé : ` (1)`, ` (2)`… sont ajoutés au nom. L'outil renvoie
+  le chemin, la taille et le type.
 - Les réponses JSON ou texte (dont CSV) sont renvoyées directement.
 
 ## Prérequis
@@ -113,6 +115,11 @@ l'outil renvoie l'erreur.
   directement à `xalantis.com`.
 - `XALANTIS_BASE_URL` (optionnel) — défaut `https://xalantis.com` ; à modifier
   uniquement si votre instance Xalantis est sur un autre domaine.
+- `XALANTIS_FILES_DIR` (optionnel) — dossier autorisé pour tous les fichiers
+  locaux, envoyés ou reçus ; défaut `~/Downloads/xalantis`, créé au
+  démarrage. Un chemin relatif dans `files` ou `save_to` est relatif à ce
+  dossier ; tout chemin qui en sort (y compris via un lien symbolique) est
+  refusé.
 
 ## Développement
 
