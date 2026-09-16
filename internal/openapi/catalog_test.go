@@ -83,7 +83,11 @@ func TestSearch(t *testing.T) {
 		t.Errorf("post_tickets introuvable sans accents : %+v", res)
 	}
 
-	for _, r := range c.Search("", "politiques d'escalade", "") {
+	esc := c.Search("", "politiques d'escalade", "")
+	if len(esc) != 3 {
+		t.Errorf("escalade (apostrophe droite) = %d, attendu 3", len(esc))
+	}
+	for _, r := range esc {
 		if !strings.Contains(r.Path, "escalation") {
 			t.Errorf("filtre domaine ignoré : %+v", r)
 		}

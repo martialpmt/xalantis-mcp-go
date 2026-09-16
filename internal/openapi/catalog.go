@@ -242,7 +242,7 @@ var foldReplacer = strings.NewReplacer(
 	"î", "i", "ï", "i",
 	"ô", "o", "ö", "o",
 	"ù", "u", "û", "u", "ü", "u",
-	"ç", "c", "œ", "oe", "'", "'",
+	"ç", "c", "œ", "oe", "’", "'",
 )
 
 // fold met en minuscules et retire les accents français.
