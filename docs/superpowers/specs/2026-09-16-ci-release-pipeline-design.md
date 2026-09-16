@@ -66,13 +66,17 @@ script, or with `go install`.
 .gitignore
 LICENSE
 install.sh
+.github/scripts/next-version.sh       # bump logic, used by release.yml
+.github/scripts/next-version_test.sh  # its tests
 ```
 
 ## `ci.yml`
 
 Triggers: `push` to `main`, `pull_request`, `workflow_call`.
-Permissions: `contents: read`. Go version from `go.mod`
-(`actions/setup-go` with `go-version-file`). Jobs run in parallel:
+Permissions: `contents: read`. Go version: `test` runs a matrix of the
+`go.mod` minimum (`go-version-file`) and `stable`; every other job, and the
+release build, uses `stable` (so govulncheck checks a supported standard
+library). Jobs run in parallel:
 
 | Job | Checks |
 |---|---|
@@ -82,7 +86,7 @@ Permissions: `contents: read`. Go version from `go.mod`
 | `vuln` | `govulncheck ./...` |
 | `secrets` | `gitleaks` CLI, full history (`fetch-depth: 0`) |
 | `build` | `go build ./...` |
-| `shellcheck` | `shellcheck install.sh` |
+| `scripts` | `shellcheck install.sh .github/scripts/*.sh`; `sh .github/scripts/next-version_test.sh` |
 
 `test_mcp.py` is not run: it needs a live Xalantis API key.
 
@@ -133,12 +137,14 @@ to delete the tag (`git push --delete origin vX.Y.Z`) so the release can be
 fixed and re-run. Step 6 runs last, so a failed release never reaches the
 proxy.
 
-Tag commits use the `github-actions[bot]` identity.
+Tags are created with the `github-actions[bot]` identity.
 
 ## `.goreleaser.yaml`
 
 - One build: `./cmd/xalantis-projects-mcp`, `CGO_ENABLED=0`,
-  `-trimpath`, `-ldflags "-s -w -X main.version={{.Version}}"`.
+  `-trimpath`, `-ldflags "-s -w -X main.version=v{{.Version}}"` (GoReleaser's
+  `.Version` has no `v`; the prefix keeps it identical to the tag and to
+  `go install` builds).
 - Targets: `linux`, `darwin`, `windows` × `amd64`, `arm64`.
 - Archives: `tar.gz`, `zip` on Windows; include `README.md` and `LICENSE`.
   Name template without the version:
