@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Test du serveur MCP : mock de l'API Xalantis + dialogue JSON-RPC via stdio."""
-import json, subprocess, threading, sys
+import json, os, subprocess, sys, tempfile, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -25,6 +25,13 @@ class Mock(BaseHTTPRequestHandler):
             "/api/v1/projects/p-1/statuses": {"success": True, "data": [{"uuid": "s-1", "name": "Bloqué"}]},
             "/api/v1/projects/p-1/members": {"success": True, "data": [{"uuid": "m-1", "name": "Salif Ka"}]},
         }
+        if u.path == "/api/v1/projects/p-1/documents/a-1/download":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", 'attachment; filename="rapport.pdf"')
+            self.end_headers()
+            self.wfile.write(b"%PDF-test")
+            return
         if u.path == "/api/v1/forbidden":
             self.send_response(403); self.end_headers()
             self.wfile.write(b'{"message":"This API key does not have the required permission."}')
@@ -39,6 +46,19 @@ class Mock(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def do_POST(self):
+        u = urlparse(self.path)
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        REQUESTS.append((self.path, self.headers.get("Authorization")))
+        POSTS.append({"path": u.path, "idem": self.headers.get("Idempotency-Key"),
+                      "type": self.headers.get("Content-Type"), "body": json.loads(body or b"null")})
+        payload = json.dumps({"success": True, "data": {"uuid": "tk-1"}}).encode()
+        self.send_response(201)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(payload)
+
+POSTS = []
 srv = HTTPServer(("127.0.0.1", 0), Mock)
 port = srv.server_address[1]
 threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -65,13 +85,31 @@ msgs = [
      "params": {"name": "xalantis_get_task", "arguments": {"project_uuid": "p-1", "task_uuid": ".."}}},  # segment ".."
     {"jsonrpc": "2.0", "method": "tools/call",
      "params": {"name": "xalantis_list_projects", "arguments": {}}},  # notification : ni réponse ni appel API
+    {"jsonrpc": "2.0", "id": 11, "method": "tools/call",
+     "params": {"name": "xalantis_search_operations", "arguments": {"query": "creer tache", "method": "POST"}}},
+    {"jsonrpc": "2.0", "id": 12, "method": "tools/call",
+     "params": {"name": "xalantis_describe_operation", "arguments": {"operation_id": "post_projects_By_projectUuid_tasks"}}},
+    {"jsonrpc": "2.0", "id": 13, "method": "tools/call",
+     "params": {"name": "xalantis_call_operation", "arguments": {
+         "operation_id": "post_projects_By_projectUuid_tasks", "path_params": {"projectUuid": "p-1"},
+         "headers": {"Idempotency-Key": "idem-42"}, "body": {"title": "Nouvelle tâche"}}}},
+    {"jsonrpc": "2.0", "id": 14, "method": "tools/call",
+     "params": {"name": "xalantis_call_operation", "arguments": {
+         "operation_id": "get_projects_By_projectUuid_documents_By_attachmentUuid_download",
+         "path_params": {"projectUuid": "p-1", "attachmentUuid": "a-1"}}}},
+    {"jsonrpc": "2.0", "id": 15, "method": "tools/call",
+     "params": {"name": "xalantis_call_operation", "arguments": {
+         "operation_id": "post_projects_By_projectUuid_tasks", "path_params": {"projectUuid": "p-1"},
+         "body": {"title": "sans clé"}}}},  # Idempotency-Key requise -> erreur sans appel API
 ]
 stdin_data = "".join(json.dumps(m) + "\n" for m in msgs)
 
+home = tempfile.mkdtemp()
+os.mkdir(os.path.join(home, "Downloads"))
 proc = subprocess.run(
     ["./xalantis-projects-mcp"],
     input=stdin_data, capture_output=True, text=True, timeout=30,
-    env={"XALANTIS_API_KEY": "sk_live_test", "XALANTIS_BASE_URL": f"http://127.0.0.1:{port}", "PATH": "/usr/bin"},
+    env={"XALANTIS_API_KEY": "sk_live_test", "XALANTIS_BASE_URL": f"http://127.0.0.1:{port}", "PATH": "/usr/bin", "HOME": home},
 )
 resp = {}
 for line in proc.stdout.splitlines():
@@ -88,7 +126,8 @@ def check(cond, label):
 check(resp[1]["result"]["serverInfo"]["name"] == "xalantis-projects-mcp", "initialize")
 check(resp[2]["result"] == {}, "ping")
 tools = {t["name"] for t in resp[3]["result"]["tools"]}
-check(len(tools) == 7 and "xalantis_list_tasks" in tools, f"tools/list ({len(tools)} outils)")
+check(len(tools) == 10 and {"xalantis_list_tasks", "xalantis_call_operation"} <= tools, f"tools/list ({len(tools)} outils)")
+check("xalantis_search_operations" in resp[1]["result"].get("instructions", ""), "instructions d'initialisation")
 r4 = json.loads(resp[4]["result"]["content"][0]["text"])
 check(r4["_query"] == {"search": ["IAP"]} and r4["data"][0]["key"] == "IAP", "list_projects + query")
 r5 = json.loads(resp[5]["result"]["content"][0]["text"])
@@ -102,8 +141,21 @@ check(resp[8]["result"]["isError"] and "invalide" in resp[8]["result"]["content"
 check(resp[9]["error"]["code"] == -32601, "méthode inconnue")
 check(resp[10]["result"]["isError"] and "invalide" in resp[10]["result"]["content"][0]["text"], "rejet segment ..")
 check(None not in resp, "pas de réponse à une notification tools/call")
+r11 = json.loads(resp[11]["result"]["content"][0]["text"])
+check(any(o["operation_id"] == "post_projects_By_projectUuid_tasks" for o in r11["operations"]), "search_operations")
+r12 = json.loads(resp[12]["result"]["content"][0]["text"])
+check(r12["method"] == "POST" and r12["body"]["content_type"] == "application/json"
+      and any(p["name"] == "Idempotency-Key" and p["required"] for p in r12["parameters"]), "describe_operation")
+r13 = json.loads(resp[13]["result"]["content"][0]["text"])
+check(r13["data"]["uuid"] == "tk-1" and POSTS and POSTS[0] == {
+    "path": "/api/v1/projects/p-1/tasks", "idem": "idem-42", "type": "application/json",
+    "body": {"title": "Nouvelle tâche"}}, "call_operation POST JSON")
+r14 = json.loads(resp[14]["result"]["content"][0]["text"])
+saved = os.path.join(home, "Downloads", "rapport.pdf")
+check(r14["saved_to"] == saved and open(saved, "rb").read() == b"%PDF-test", "call_operation téléchargement")
+check(resp[15]["result"]["isError"] and "Idempotency-Key" in resp[15]["result"]["content"][0]["text"], "Idempotency-Key requise")
 check(all(a == "Bearer sk_live_test" for _, a in REQUESTS), "header Authorization sur chaque appel")
-check(len(REQUESTS) == 3, f"{len(REQUESTS)} appels API (les entrées invalides n'atteignent pas l'API)")
+check(len(REQUESTS) == 5, f"{len(REQUESTS)} appels API (les entrées invalides n'atteignent pas l'API)")
 check(proc.stderr.strip() == "", "stderr vide")
 
 srv.shutdown()
