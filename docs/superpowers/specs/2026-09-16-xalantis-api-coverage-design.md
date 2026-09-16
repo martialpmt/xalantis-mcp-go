@@ -201,3 +201,24 @@ temp dir.
 flow, the 12 areas and their scopes, file handling, the new build command,
 a note that write access depends on the API key's scopes, and the base URL
 default `https://xalantis.com`.
+
+## Amendments (implementation planning, 2026-09-16)
+
+Facts found in the OpenAPI file changed these details:
+
+1. `tools` imports `mcp` for the `mcp.Tool` type; `mcp` stays a leaf package.
+2. Required header parameters are validated like required query parameters.
+   70 operations require `Idempotency-Key`.
+3. Query parameter names are used as declared (`status[]`, `type[]`, …).
+   `query` also accepts the name without `[]` and `base[sub]` keys for object
+   parameters (`custom_fields[clé]`). Unknown names are rejected.
+4. The client reads responses up to 100 MB (documents reach 50 MB). Text
+   returned to Claude is limited to 10 MB; larger text is an error.
+5. Multipart array file fields are sent as `name[]` (e.g. `files[]`).
+6. `save_to` never overwrites either; it uses the same ` (1)` suffix rule.
+7. "No filters → list areas" is handled by the search tool, not by
+   `Catalog.Search`.
+8. Unknown path parameter keys are rejected; operations without a request
+   body reject `body`.
+9. No `$ref` appears in request bodies or parameters of the 206 operations
+   (only in responses). The resolver is kept as a safeguard.
