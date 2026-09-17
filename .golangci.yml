@@ -1,0 +1,18 @@
+version: "2"
+
+linters:
+  # Défauts : errcheck, govet, ineffassign, staticcheck, unused.
+  enable:
+    - gosec
+    - misspell
+    - revive
+  settings:
+    misspell:
+      ignore-rules:
+        - permises
+        - enveloppe
+        - correspondant
+        - statuts
+  exclusions:
+    presets:
+      - std-error-handling

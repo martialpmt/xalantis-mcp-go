@@ -32,7 +32,7 @@ func newRecorder(t *testing.T, h http.HandlerFunc) *recorder {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"success":true}`))
+		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
 	t.Cleanup(r.srv.Close)
 	return r

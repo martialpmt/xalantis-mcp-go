@@ -365,7 +365,7 @@ func createUnique(path string) (*os.File, string, error) {
 		if i > 0 {
 			p = fmt.Sprintf("%s (%d)%s", stem, i, ext)
 		}
-		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G304: p vient de resolveSaveTo ou de filesDir+safeFilename, déjà confiné à XALANTIS_FILES_DIR
 		if err == nil {
 			return f, p, nil
 		}
