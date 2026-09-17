@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -140,7 +141,6 @@ func TestCallRejectsBadInputWithoutCallingAPI(t *testing.T) {
 		"requête inconnue":      {"operation_id": "get_tickets", "query": map[string]any{"nope": "1"}},
 		"requête objet":         {"operation_id": "get_tickets", "query": "pas un objet"},
 		"en-tête interdit":      {"operation_id": "get_tickets", "headers": map[string]any{"Authorization": "x"}},
-		"en-tête requis":        {"operation_id": "post_projects_By_projectUuid_documents", "path_params": map[string]any{"projectUuid": "p"}, "files": map[string]any{"files": file}},
 		"fichier sur JSON":      {"operation_id": "post_tickets", "files": map[string]any{"file": file}},
 		"corps sur GET":         {"operation_id": "get_tickets", "body": map[string]any{"a": 1}},
 		"fichier absent":        {"operation_id": "post_projects_By_projectUuid_imports", "path_params": map[string]any{"projectUuid": "p"}, "headers": map[string]any{"Idempotency-Key": "k"}, "files": map[string]any{"file": filepath.Join(dir, "absent")}},
@@ -639,5 +639,69 @@ func TestReadOnlyMode(t *testing.T) {
 	}
 	if len(rec.requests) != 0 {
 		t.Errorf("%d appels API, attendu 0", len(rec.requests))
+	}
+}
+
+var uuidV4 = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+func newTaskInput() map[string]any {
+	return map[string]any{
+		"operation_id": "post_projects_By_projectUuid_tasks",
+		"path_params":  map[string]any{"projectUuid": "p-1"},
+		"body":         map[string]any{"title": "x"},
+	}
+}
+
+func TestCallGeneratesIdempotencyKey(t *testing.T) {
+	rec := newRecorder(t, nil)
+	call := genericTool(t, rec, t.TempDir(), "xalantis_call_operation")
+	blank := newTaskInput()
+	blank["headers"] = map[string]any{"Idempotency-Key": "  "}
+	for _, in := range []map[string]any{newTaskInput(), newTaskInput(), blank} {
+		if _, err := call.Handler(in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys := make([]string, len(rec.requests))
+	for i, r := range rec.requests {
+		keys[i] = r.Header.Get("Idempotency-Key")
+		if !uuidV4.MatchString(keys[i]) {
+			t.Errorf("appel %d : clé %q, UUID v4 attendu", i, keys[i])
+		}
+	}
+	if keys[0] == keys[1] {
+		t.Errorf("deux appels, même clé générée : %s", keys[0])
+	}
+}
+
+func TestCallFailureReportsGeneratedKey(t *testing.T) {
+	rec := newRecorder(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"boum"}`))
+	})
+	call := genericTool(t, rec, t.TempDir(), "xalantis_call_operation")
+
+	_, err := call.Handler(newTaskInput())
+	sent := rec.requests[0].Header.Get("Idempotency-Key")
+	want := "(Idempotency-Key générée : " + sent + " — réutilisez-la pour réessayer)"
+	if err == nil || !strings.Contains(err.Error(), "HTTP 500") || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("erreur = %v, attendu le suffixe %q", err, want)
+	}
+
+	given := newTaskInput()
+	given["headers"] = map[string]any{"Idempotency-Key": "idem-1"}
+	if _, err := call.Handler(given); err == nil || strings.Contains(err.Error(), "générée") {
+		t.Errorf("clé fournie : %v", err)
+	}
+}
+
+func TestBuildHeadersRequiredHeader(t *testing.T) {
+	op := &openapi.Operation{ID: "op", Params: []openapi.Param{{Name: "If-Match", In: "header", Required: true}}}
+	if _, _, err := buildHeaders(op, nil); err == nil || err.Error() != "en-tête requis manquant : If-Match" {
+		t.Errorf("If-Match manquant : %v", err)
+	}
+	h, generated, err := buildHeaders(op, map[string]any{"if-match": "v1"})
+	if err != nil || h["If-Match"] != "v1" || generated != "" {
+		t.Errorf("If-Match fourni : %v %v %q", h, err, generated)
 	}
 }

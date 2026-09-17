@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -183,7 +184,7 @@ func callOperation(c *xalantis.Client, cat *openapi.Catalog, filesDir string, a 
 	if err != nil {
 		return "", err
 	}
-	headers, err := buildHeaders(op, headerArgs)
+	headers, generatedKey, err := buildHeaders(op, headerArgs)
 	if err != nil {
 		return "", err
 	}
@@ -239,6 +240,9 @@ func callOperation(c *xalantis.Client, cat *openapi.Catalog, filesDir string, a 
 
 	resp, err := c.Do(op.Method, path, query, headers, reader, contentType)
 	if err != nil {
+		if generatedKey != "" {
+			return "", fmt.Errorf("%w (Idempotency-Key générée : %s — réutilisez-la pour réessayer)", err, generatedKey)
+		}
 		return "", err
 	}
 	if len(resp.Body) == 0 {
@@ -314,7 +318,10 @@ func buildQuery(op *openapi.Operation, values map[string]any) (url.Values, error
 	return q, nil
 }
 
-func buildHeaders(op *openapi.Operation, values map[string]any) (map[string]string, error) {
+// buildHeaders valide les en-têtes fournis. Si l'opération déclare
+// Idempotency-Key et qu'aucune valeur n'est fournie, une clé est générée et
+// renvoyée en second résultat ("" sinon).
+func buildHeaders(op *openapi.Operation, values map[string]any) (map[string]string, string, error) {
 	h := map[string]string{}
 	for k, v := range values {
 		var name string
@@ -324,22 +331,38 @@ func buildHeaders(op *openapi.Operation, values map[string]any) (map[string]stri
 			}
 		}
 		if name == "" {
-			return nil, fmt.Errorf("en-tête non autorisé pour %s : %s", op.ID, k)
+			return nil, "", fmt.Errorf("en-tête non autorisé pour %s : %s", op.ID, k)
 		}
 		s, err := scalar(name, v)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if strings.TrimSpace(s) != "" {
 			h[name] = strings.TrimSpace(s)
 		}
 	}
+	generated := ""
 	for _, p := range op.Params {
-		if p.In == "header" && p.Required && h[p.Name] == "" {
-			return nil, fmt.Errorf("en-tête requis manquant : %s (valeur unique par mutation, ex. un UUID)", p.Name)
+		if p.In == "header" && strings.EqualFold(p.Name, "Idempotency-Key") && h[p.Name] == "" {
+			generated = newUUID()
+			h[p.Name] = generated
 		}
 	}
-	return h, nil
+	for _, p := range op.Params {
+		if p.In == "header" && p.Required && h[p.Name] == "" {
+			return nil, "", fmt.Errorf("en-tête requis manquant : %s", p.Name)
+		}
+	}
+	return h, generated, nil
+}
+
+// newUUID renvoie un UUID v4 aléatoire (RFC 9562).
+func newUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:]) // depuis Go 1.24, ne renvoie jamais d'erreur (le programme s'arrête en cas d'échec)
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
 func buildFiles(op *openapi.Operation, filesDir string, values map[string]any) ([]xalantis.FilePart, error) {
