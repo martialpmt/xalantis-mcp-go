@@ -10,17 +10,18 @@ de services. Il complète le connecteur Xalantis existant.
 
 > **Attention : écriture possible.** Le serveur expose aussi les opérations
 > de création, de modification et de suppression. Ce que Claude peut faire
-> dépend uniquement des scopes de la clé API. Pour un usage en lecture seule,
-> utilisez une clé qui n'a que des scopes `:read`.
+> dépend des scopes de la clé API. Pour un usage en lecture seule, utilisez
+> une clé qui n'a que des scopes `:read`, ou définissez
+> `XALANTIS_READ_ONLY=1` : le serveur n'expose alors aucune écriture.
 >
 > **Fichiers locaux.** Le serveur ne lit et n'écrit des fichiers que dans un
 > seul dossier : `XALANTIS_FILES_DIR` (défaut `~/Downloads/xalantis`, créé
 > au démarrage). Pour envoyer un fichier, copiez-le d'abord dans ce dossier.
 > Les liens symboliques qui sortent du dossier sont refusés.
 
-## Outils exposés (10)
+## Outils exposés (11)
 
-Outils dédiés aux lectures courantes de projets (inchangés) :
+Outils dédiés aux lectures courantes de projets (lecture seule) :
 
 | Outil | Rôle |
 |---|---|
@@ -38,10 +39,16 @@ Outils génériques, pour toutes les autres opérations, à utiliser dans cet or
 |---|---|
 | `xalantis_search_operations` | 1. Trouver une opération (mots-clés, domaine, méthode). Sans filtre : liste des domaines. |
 | `xalantis_describe_operation` | 2. Voir ses paramètres et le schéma de son corps. |
-| `xalantis_call_operation` | 3. L'exécuter (`path_params`, `query`, `headers`, `body`, `files`, `save_to`). |
+| `xalantis_read_operation` | 3. Exécuter une lecture (GET) : `path_params`, `query`, `headers`, `save_to`. |
+| `xalantis_call_operation` | 3. Exécuter une écriture (POST, PUT, PATCH, DELETE) : mêmes arguments, plus `body` et `files`. Absent avec `XALANTIS_READ_ONLY=1`. |
 
-Les opérations d'écriture exigent souvent l'en-tête `Idempotency-Key`
-(valeur unique par mutation, par ex. un UUID) : passez-le dans `headers`.
+Les outils de lecture portent l'annotation MCP `readOnlyHint` et l'outil
+d'écriture `destructiveHint` : le client peut approuver les lectures
+automatiquement et demander confirmation avant une écriture.
+
+L'en-tête `Idempotency-Key` des écritures est facultatif : s'il manque, le
+serveur génère un UUID. Si l'appel échoue, l'erreur donne la clé générée ;
+la repasser dans `headers` pour réessayer sans créer de doublon.
 
 ## Domaines couverts et scopes
 
@@ -171,6 +178,9 @@ Le binaire est installé dans `$(go env GOPATH)/bin`.
   démarrage. Un chemin relatif dans `files` ou `save_to` est relatif à ce
   dossier ; tout chemin qui en sort (y compris via un lien symbolique) est
   refusé.
+- `XALANTIS_READ_ONLY` (optionnel) — `1`/`true` : le serveur n'expose
+  pas `xalantis_call_operation` et la recherche ne renvoie que des
+  lectures ; défaut `false`. Une valeur invalide empêche le démarrage.
 
 ## Développement
 
