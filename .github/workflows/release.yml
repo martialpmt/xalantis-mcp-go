@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Partie de la version à incrémenter
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  MODULE: github.com/martialpmt/xalantis-mcp-go
+
+jobs:
+  gate:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: gate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+
+      - name: Compute version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          latest=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+          version=$(sh .github/scripts/next-version.sh "$latest" "$BUMP")
+          if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "::error::Le tag $version existe déjà"
+            exit 1
+          fi
+          echo "Version : ${latest:-aucune} -> $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        id: tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+
+      - name: GoReleaser
+        id: goreleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.18.1
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to the Go module proxy
+        id: proxy
+        working-directory: ${{ runner.temp }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GOPROXY: https://proxy.golang.org
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if go list -m "$MODULE@$VERSION"; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          echo "::error::Le proxy Go ne trouve pas $MODULE@$VERSION"
+          exit 1
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "## Release $VERSION"
+            echo
+            echo "- GitHub Release : $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$VERSION"
+            echo "- pkg.go.dev : https://pkg.go.dev/$MODULE@$VERSION"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | VERSION=$VERSION sh"
+            echo "go install $MODULE/cmd/xalantis-projects-mcp@$VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Recovery instructions (GoReleaser failed)
+        if: failure() && steps.goreleaser.outcome == 'failure'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "## Échec de GoReleaser après la création du tag $VERSION"
+            echo
+            echo "Rien n'a été publié sur le proxy Go. Supprimez la release GitHub partielle s'il y en a une, puis le tag, corrigez et relancez :"
+            echo
+            echo '```sh'
+            echo "git push --delete origin $VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Recovery instructions (proxy failed)
+        if: failure() && steps.proxy.outcome == 'failure'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "## La release $VERSION est publiée, mais le proxy Go ne l'a pas encore"
+            echo
+            echo "Ne supprimez pas le tag. Réessayez plus tard :"
+            echo
+            echo '```sh'
+            echo "GOPROXY=https://proxy.golang.org go list -m $MODULE@$VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  install-smoke:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release.outputs.version }}
+          persist-credentials: false
+      - name: Install from the release
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
+          got=$("$RUNNER_TEMP/bin/xalantis-projects-mcp" --version)
+          if [ "$got" != "$VERSION" ]; then
+            echo "::error::Version installée $got, attendue $VERSION"
+            exit 1
+          fi
