@@ -48,7 +48,9 @@ automatiquement et demander confirmation avant une écriture.
 
 L'en-tête `Idempotency-Key` des écritures est facultatif : s'il manque, le
 serveur génère un UUID. Si l'appel échoue, l'erreur donne la clé générée ;
-la repasser dans `headers` pour réessayer sans créer de doublon.
+la repasser dans `headers` pour relancer la même requête sans créer de
+doublon. Si le corps change, omettre la clé : la réutiliser avec un corps
+différent est refusé (HTTP 409).
 
 ## Domaines couverts et scopes
 

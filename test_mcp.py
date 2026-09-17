@@ -160,7 +160,7 @@ check(r13["data"]["uuid"] == "tk-1" and POSTS and POSTS[0] == {
     "body": {"title": "Nouvelle tâche"}}, "call_operation POST JSON")
 r14 = json.loads(resp[14]["result"]["content"][0]["text"])
 saved = os.path.join(home, "Downloads", "xalantis", "rapport.pdf")
-check(r14["saved_to"] == saved and open(saved, "rb").read() == b"%PDF-test", "call_operation téléchargement")
+check(r14["saved_to"] == saved and open(saved, "rb").read() == b"%PDF-test", "read_operation téléchargement")
 check(not resp[15]["result"]["isError"] and len(POSTS) == 2
       and re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", POSTS[1]["idem"] or "")
       and POSTS[1]["body"] == {"title": "sans clé"}, "Idempotency-Key générée")

@@ -46,7 +46,7 @@ func GenericTools(c *xalantis.Client, cat *openapi.Catalog, filesDir string, rea
 	readProps := merge(opID, map[string]any{
 		"path_params": map[string]any{"type": "object", "description": "Paramètres de chemin, ex. {\"projectUuid\": \"…\"}."},
 		"query":       map[string]any{"type": "object", "description": "Paramètres de requête. Tableau = valeurs répétées (nom[]), objet = nom[clé]."},
-		"headers":     map[string]any{"type": "object", "description": "En-têtes déclarés par l'opération (If-Match ; Idempotency-Key est générée si absente)."},
+		"headers":     map[string]any{"type": "object", "description": "En-têtes déclarés par l'opération."},
 		"save_to":     prop("string", "Chemin où enregistrer la réponse (fichier ou texte, ex. un export CSV), dans le dossier autorisé (XALANTIS_FILES_DIR ; chemin relatif = relatif à ce dossier). Sans save_to, les fichiers reçus sont enregistrés dans ce dossier et le texte est renvoyé directement."),
 	})
 	tools := []mcp.Tool{
@@ -115,8 +115,9 @@ func GenericTools(c *xalantis.Client, cat *openapi.Catalog, filesDir string, rea
 			"Peut créer, modifier ou supprimer des données selon les scopes de la clé API. " +
 			"Les fichiers envoyés sont des chemins locaux ; les fichiers reçus sont enregistrés localement.",
 		InputSchema: schema([]string{"operation_id"}, merge(readProps, map[string]any{
-			"body":  map[string]any{"type": "object", "description": "Corps JSON, ou champs texte pour une opération multipart."},
-			"files": map[string]any{"type": "object", "description": "Opérations multipart : champ → chemin ou liste de chemins, dans le dossier autorisé (XALANTIS_FILES_DIR ; chemin relatif = relatif à ce dossier)."},
+			"headers": map[string]any{"type": "object", "description": "En-têtes déclarés par l'opération (If-Match ; Idempotency-Key est générée si absente)."},
+			"body":    map[string]any{"type": "object", "description": "Corps JSON, ou champs texte pour une opération multipart."},
+			"files":   map[string]any{"type": "object", "description": "Opérations multipart : champ → chemin ou liste de chemins, dans le dossier autorisé (XALANTIS_FILES_DIR ; chemin relatif = relatif à ce dossier)."},
 		})),
 		Annotations: destructiveHint,
 		Handler: func(raw map[string]any) (string, error) {
@@ -241,7 +242,7 @@ func callOperation(c *xalantis.Client, cat *openapi.Catalog, filesDir string, a 
 	resp, err := c.Do(op.Method, path, query, headers, reader, contentType)
 	if err != nil {
 		if generatedKey != "" {
-			return "", fmt.Errorf("%w (Idempotency-Key générée : %s — réutilisez-la pour réessayer)", err, generatedKey)
+			return "", fmt.Errorf("%w (Idempotency-Key générée : %s — réutilisez-la pour relancer la même requête ; si le corps change, omettez-la)", err, generatedKey)
 		}
 		return "", err
 	}

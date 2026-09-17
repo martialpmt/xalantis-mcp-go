@@ -569,6 +569,17 @@ func TestToolAnnotations(t *testing.T) {
 		if hint := want[tool.Name]; hint == "" || tool.Annotations[hint] != true {
 			t.Errorf("%s : annotations %v", tool.Name, tool.Annotations)
 		}
+		if tool.Name == "xalantis_read_operation" || tool.Name == "xalantis_call_operation" {
+			props := tool.InputSchema["properties"].(map[string]any)
+			desc := props["headers"].(map[string]any)["description"].(string)
+			mentionsIdem := strings.Contains(desc, "Idempotency-Key")
+			if tool.Name == "xalantis_call_operation" && !mentionsIdem {
+				t.Errorf("%s : description de headers sans Idempotency-Key : %q", tool.Name, desc)
+			}
+			if tool.Name == "xalantis_read_operation" && mentionsIdem {
+				t.Errorf("%s : description de headers mentionne Idempotency-Key : %q", tool.Name, desc)
+			}
+		}
 	}
 	for _, tool := range ProjectTools(nil) {
 		if tool.Annotations["readOnlyHint"] != true {
@@ -683,7 +694,7 @@ func TestCallFailureReportsGeneratedKey(t *testing.T) {
 
 	_, err := call.Handler(newTaskInput())
 	sent := rec.requests[0].Header.Get("Idempotency-Key")
-	want := "(Idempotency-Key générée : " + sent + " — réutilisez-la pour réessayer)"
+	want := "(Idempotency-Key générée : " + sent + " — réutilisez-la pour relancer la même requête ; si le corps change, omettez-la)"
 	if err == nil || !strings.Contains(err.Error(), "HTTP 500") || !strings.HasSuffix(err.Error(), want) {
 		t.Errorf("erreur = %v, attendu le suffixe %q", err, want)
 	}
@@ -692,6 +703,9 @@ func TestCallFailureReportsGeneratedKey(t *testing.T) {
 	given["headers"] = map[string]any{"Idempotency-Key": "idem-1"}
 	if _, err := call.Handler(given); err == nil || strings.Contains(err.Error(), "générée") {
 		t.Errorf("clé fournie : %v", err)
+	}
+	if got := rec.requests[1].Header.Get("Idempotency-Key"); got != "idem-1" {
+		t.Errorf("clé fournie envoyée = %q, attendu %q", got, "idem-1")
 	}
 }
 

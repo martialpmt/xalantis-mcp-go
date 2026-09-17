@@ -67,9 +67,10 @@ and stop failing writes that lack an `Idempotency-Key`.
   whitespace), generate a UUID v4 with `crypto/rand` (no dependency). A
   caller-supplied key is kept as is.
 - When the call fails, the error message includes the generated key and
-  tells Claude to reuse it on retry, so a retry does not create a second
-  change: `… (Idempotency-Key générée : <uuid> — réutilisez-la pour
-  réessayer)`.
+  tells Claude to reuse it to resend the same request (the API refuses a
+  reused key with a different body, HTTP 409), and to omit it if the body
+  changes: `… (Idempotency-Key générée : <uuid> — réutilisez-la pour
+  relancer la même requête ; si le corps change, omettez-la)`.
 - The "en-tête requis manquant" error no longer fires for
   `Idempotency-Key`; it still fires for other required headers
   (e.g. `If-Match`).
