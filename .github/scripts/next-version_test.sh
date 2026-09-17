@@ -29,6 +29,10 @@ expect ERREUR v0.1.0 bogus
 expect ERREUR v0.1.0
 expect ERREUR 1.2.3 patch
 expect ERREUR v1.2.3-rc.1 patch
+expect ERREUR v1.2.08 patch
+expect ERREUR v1.2.010 patch
+expect ERREUR v01.2.3 patch
+expect v1.0.1 v1.0.0 patch
 
 if [ "$fail" -eq 0 ]; then
 	echo OK

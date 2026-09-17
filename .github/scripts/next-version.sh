@@ -6,7 +6,7 @@ set -eu
 latest=${1:-v0.0.0}
 bump=${2:-}
 
-if ! printf '%s\n' "$latest" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+if ! printf '%s\n' "$latest" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
 	echo "tag invalide : $latest (attendu vX.Y.Z)" >&2
 	exit 1
 fi
