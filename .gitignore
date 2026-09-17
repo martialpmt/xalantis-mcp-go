@@ -1,5 +1,5 @@
 # Binaire compilé localement
-/xalantis-projects-mcp
+/xalantis-mcp-go
 # Sorties GoReleaser et couverture
 /dist/
 coverage.out

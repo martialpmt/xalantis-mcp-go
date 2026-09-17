@@ -1,11 +1,11 @@
 version: 2
 
-project_name: xalantis-projects-mcp
+project_name: xalantis-mcp-go
 
 builds:
-  - id: xalantis-projects-mcp
-    main: ./cmd/xalantis-projects-mcp
-    binary: xalantis-projects-mcp
+  - id: xalantis-mcp-go
+    main: ./cmd/xalantis-mcp-go
+    binary: xalantis-mcp-go
     env:
       - CGO_ENABLED=0
     flags:
