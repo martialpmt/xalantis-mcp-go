@@ -52,7 +52,7 @@ func GenericTools(c *xalantis.Client, cat *openapi.Catalog, filesDir string) []m
 				a := args(raw)
 				query, area, method := a.str("query"), a.str("area"), a.str("method")
 				if query == "" && area == "" && method == "" {
-					return toJSON(map[string]any{"areas": cat.AreaCounts()})
+					return toJSON(map[string]any{"areas": cat.AreaCounts("")})
 				}
 				res := cat.Search(query, area, method)
 				return toJSON(map[string]any{"count": len(res), "operations": res})
