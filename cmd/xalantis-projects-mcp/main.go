@@ -9,9 +9,11 @@
 //	                                    téléchargements) ; défaut : <dossier personnel>/Downloads/xalantis
 //
 // Compilation : go build -o xalantis-projects-mcp ./cmd/xalantis-projects-mcp
+// Version : xalantis-projects-mcp --version
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,14 +25,21 @@ import (
 )
 
 const (
-	serverName    = "xalantis-projects-mcp"
-	serverVersion = "2.0.0"
-	instructions  = "Pour les lectures courantes de projets, utilisez les 7 outils dédiés (xalantis_list_projects, xalantis_list_tasks…). " +
+	serverName   = "xalantis-projects-mcp"
+	instructions = "Pour les lectures courantes de projets, utilisez les 7 outils dédiés (xalantis_list_projects, xalantis_list_tasks…). " +
 		"Pour toute autre opération Xalantis (tickets, SLA, catalogue, écriture sur les projets…) : " +
 		"xalantis_search_operations, puis xalantis_describe_operation, puis xalantis_call_operation."
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "affiche la version et quitte")
+	flag.Parse()
+	ver := currentVersion()
+	if *showVersion {
+		fmt.Println(ver)
+		return
+	}
+
 	cat, err := openapi.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "spécification OpenAPI embarquée illisible :", err)
@@ -39,7 +48,7 @@ func main() {
 	client := xalantis.NewClient(xalantis.Config{
 		BaseURL:   os.Getenv("XALANTIS_BASE_URL"),
 		APIKey:    os.Getenv("XALANTIS_API_KEY"),
-		UserAgent: serverName + "/" + serverVersion,
+		UserAgent: serverName + "/" + ver,
 	})
 
 	filesDir := os.Getenv("XALANTIS_FILES_DIR")
@@ -60,7 +69,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := mcp.NewServer(serverName, serverVersion, instructions)
+	srv := mcp.NewServer(serverName, ver, instructions)
 	srv.Register(tools.ProjectTools(client)...)
 	srv.Register(tools.GenericTools(client, cat, filesDir)...)
 	if err := srv.Serve(os.Stdin, os.Stdout); err != nil {
