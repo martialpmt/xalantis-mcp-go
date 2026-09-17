@@ -132,10 +132,7 @@ install-smoke  needs: release
 Dispatching from any branch other than `main` skips `release`; the
 `gate` still runs, which is harmless.
 
-If step 5 fails after the tag is pushed, the job summary prints the command
-to delete the tag (`git push --delete origin vX.Y.Z`) so the release can be
-fixed and re-run. Step 6 runs last, so a failed release never reaches the
-proxy.
+If step 5 fails after the tag is pushed, the job summary says not to delete or reuse the tag (it is public and the Go proxy may already have cached it): delete any partial GitHub Release, fix `main`, and dispatch again, which creates the next version; add a `retract` directive if the tagged code is broken. Step 6 runs last, so the workflow itself never publishes a failed release to the proxy.
 
 Tags are created with the `github-actions[bot]` identity.
 

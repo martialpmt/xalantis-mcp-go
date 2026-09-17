@@ -85,7 +85,9 @@ jobs:
             if go list -m "$MODULE@$VERSION"; then
               exit 0
             fi
-            sleep $((attempt * 10))
+            if [ "$attempt" -lt 5 ]; then
+              sleep $((attempt * 10))
+            fi
           done
           echo "::error::Le proxy Go ne trouve pas $MODULE@$VERSION"
           exit 1
@@ -114,11 +116,11 @@ jobs:
           {
             echo "## Échec de GoReleaser après la création du tag $VERSION"
             echo
-            echo "Rien n'a été publié sur le proxy Go. Supprimez la release GitHub partielle s'il y en a une, puis le tag, corrigez et relancez :"
+            echo "Rien n'a été publié par ce workflow sur le proxy Go, mais le tag est public : ne le supprimez pas et ne réutilisez pas ce numéro de version (le proxy Go a pu le mettre en cache)."
             echo
-            echo '```sh'
-            echo "git push --delete origin $VERSION"
-            echo '```'
+            echo "1. Supprimez la release GitHub $VERSION si elle a été créée partiellement."
+            echo "2. Corrigez le problème sur main, puis relancez le workflow Release : il créera la version suivante."
+            echo "3. Si le code du tag $VERSION est défectueux, ajoutez \`retract $VERSION\` dans go.mod lors de la prochaine version."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Recovery instructions (proxy failed)
