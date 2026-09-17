@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installe xalantis-projects-mcp depuis les GitHub Releases (macOS, Linux).
+# Installe xalantis-mcp-go depuis les GitHub Releases (macOS, Linux).
 #
 #   curl -fsSL https://raw.githubusercontent.com/martialpmt/xalantis-mcp-go/main/install.sh | sh
 #
@@ -9,7 +9,7 @@
 #   BASE_URL     URL des releases (tests locaux uniquement)
 set -eu
 
-BINARY=xalantis-projects-mcp
+BINARY=xalantis-mcp-go
 RELEASES_URL=https://github.com/martialpmt/xalantis-mcp-go/releases
 VERSION=${VERSION:-latest}
 INSTALL_DIR=${INSTALL_DIR:-$HOME/.local/bin}

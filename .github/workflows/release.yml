@@ -110,7 +110,7 @@ jobs:
             echo
             echo '```sh'
             echo "curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | VERSION=$VERSION sh"
-            echo "go install $MODULE/cmd/xalantis-projects-mcp@$VERSION"
+            echo "go install $MODULE/cmd/xalantis-mcp-go@$VERSION"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -163,7 +163,7 @@ jobs:
           VERSION: ${{ needs.release.outputs.version }}
         run: |
           INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
-          got=$("$RUNNER_TEMP/bin/xalantis-projects-mcp" --version)
+          got=$("$RUNNER_TEMP/bin/xalantis-mcp-go" --version)
           if [ "$got" != "$VERSION" ]; then
             echo "::error::Version installée $got, attendue $VERSION"
             exit 1

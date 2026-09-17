@@ -106,7 +106,7 @@ stdin_data = "".join(json.dumps(m) + "\n" for m in msgs)
 
 home = tempfile.mkdtemp()
 proc = subprocess.run(
-    ["./xalantis-projects-mcp"],
+    ["./xalantis-mcp-go"],
     input=stdin_data, capture_output=True, text=True, timeout=30,
     env={"XALANTIS_API_KEY": "sk_live_test", "XALANTIS_BASE_URL": f"http://127.0.0.1:{port}", "PATH": "/usr/bin", "HOME": home},
 )
@@ -122,7 +122,7 @@ def check(cond, label):
     print(("PASS " if cond else "FAIL ") + label)
     ok = ok and cond
 
-check(resp[1]["result"]["serverInfo"]["name"] == "xalantis-projects-mcp", "initialize")
+check(resp[1]["result"]["serverInfo"]["name"] == "xalantis-mcp-go", "initialize")
 check(resp[2]["result"] == {}, "ping")
 tools = {t["name"] for t in resp[3]["result"]["tools"]}
 check(len(tools) == 10 and {"xalantis_list_tasks", "xalantis_call_operation"} <= tools, f"tools/list ({len(tools)} outils)")

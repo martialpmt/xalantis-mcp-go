@@ -1,4 +1,4 @@
-// xalantis-projects-mcp — serveur MCP (stdio) pour l'API Xalantis (api/v1) :
+// xalantis-mcp-go — serveur MCP (stdio) pour l'API Xalantis (api/v1) :
 // projets et tâches, service desk et catalogue de services.
 //
 // Configuration par variables d'environnement :
@@ -8,8 +8,8 @@
 //	XALANTIS_FILES_DIR (optionnel)   — dossier autorisé pour les fichiers locaux (envoi, save_to,
 //	                                    téléchargements) ; défaut : <dossier personnel>/Downloads/xalantis
 //
-// Compilation : go build -o xalantis-projects-mcp ./cmd/xalantis-projects-mcp
-// Version : xalantis-projects-mcp --version
+// Compilation : go build -o xalantis-mcp-go ./cmd/xalantis-mcp-go
+// Version : xalantis-mcp-go --version
 package main
 
 import (
@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	serverName   = "xalantis-projects-mcp"
+	serverName   = "xalantis-mcp-go"
 	instructions = "Pour les lectures courantes de projets, utilisez les 7 outils dédiés (xalantis_list_projects, xalantis_list_tasks…). " +
 		"Pour toute autre opération Xalantis (tickets, SLA, catalogue, écriture sur les projets…) : " +
 		"xalantis_search_operations, puis xalantis_describe_operation, puis xalantis_call_operation."
