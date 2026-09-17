@@ -15,11 +15,13 @@ const ProtocolVersion = "2025-06-18"
 // Handler exécute un outil. Une erreur devient un résultat isError=true.
 type Handler func(args map[string]any) (string, error)
 
-// Tool décrit un outil exposé au client MCP.
+// Tool décrit un outil exposé au client MCP. Annotations porte les indices
+// MCP (readOnlyHint, destructiveHint…) ; nil = champ absent.
 type Tool struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
+	Annotations map[string]any `json:"annotations,omitempty"`
 	Handler     Handler        `json:"-"`
 }
 
