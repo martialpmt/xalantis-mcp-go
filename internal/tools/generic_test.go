@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"paymetrust/xalantis-projects-mcp/internal/mcp"
-	"paymetrust/xalantis-projects-mcp/internal/openapi"
+	"github.com/martialpmt/xalantis-mcp-go/internal/mcp"
+	"github.com/martialpmt/xalantis-mcp-go/internal/openapi"
 )
 
 func catalog(t *testing.T) *openapi.Catalog {

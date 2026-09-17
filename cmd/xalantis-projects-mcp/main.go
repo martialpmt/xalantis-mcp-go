@@ -16,10 +16,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"paymetrust/xalantis-projects-mcp/internal/mcp"
-	"paymetrust/xalantis-projects-mcp/internal/openapi"
-	"paymetrust/xalantis-projects-mcp/internal/tools"
-	"paymetrust/xalantis-projects-mcp/internal/xalantis"
+	"github.com/martialpmt/xalantis-mcp-go/internal/mcp"
+	"github.com/martialpmt/xalantis-mcp-go/internal/openapi"
+	"github.com/martialpmt/xalantis-mcp-go/internal/tools"
+	"github.com/martialpmt/xalantis-mcp-go/internal/xalantis"
 )
 
 const (
