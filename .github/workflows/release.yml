@@ -39,12 +39,18 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
+          cache: false
 
       - name: Compute version
         id: version
         env:
           BUMP: ${{ inputs.bump }}
         run: |
+          existing=$(git tag --points-at HEAD --list 'v*' | head -n1)
+          if [ -n "$existing" ]; then
+            echo "::error::Ce commit est déjà publié en $existing. Poussez un nouveau commit sur main avant de relancer une release."
+            exit 1
+          fi
           latest=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
           version=$(sh .github/scripts/next-version.sh "$latest" "$BUMP")
           if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
@@ -136,6 +142,8 @@ jobs:
             echo '```sh'
             echo "GOPROXY=https://proxy.golang.org go list -m $MODULE@$VERSION"
             echo '```'
+            echo
+            echo "Ne relancez pas ce job : il créerait une nouvelle version pour le même commit."
           } >> "$GITHUB_STEP_SUMMARY"
 
   install-smoke:

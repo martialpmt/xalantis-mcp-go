@@ -74,9 +74,10 @@ install.sh
 
 Triggers: `push` to `main`, `pull_request`, `workflow_call`.
 Permissions: `contents: read`. Go version: `test` runs a matrix of the
-`go.mod` minimum (`go-version-file`) and `stable`; every other job, and the
-release build, uses `stable` (so govulncheck checks a supported standard
-library). Jobs run in parallel:
+`go.mod` minimum (`go-version-file`) and `stable`; `lint` uses the `go.mod`
+version (the pinned golangci-lint binary may not support a newer Go); every
+other job, and the release build, uses `stable` (so govulncheck checks a
+supported standard library). Jobs run in parallel:
 
 | Job | Checks |
 |---|---|
@@ -131,6 +132,10 @@ install-smoke  needs: release
 
 Dispatching from any branch other than `main` skips `release`; the
 `gate` still runs, which is harmless.
+
+The version step also fails if `HEAD` already carries a `vX.Y.Z` tag, so
+re-running a partly failed release, or dispatching twice on an unchanged
+`main`, never creates a second version for the same commit.
 
 If step 5 fails after the tag is pushed, the job summary says not to delete or reuse the tag (it is public and the Go proxy may already have cached it): delete any partial GitHub Release, fix `main`, and dispatch again, which creates the next version; add a `retract` directive if the tagged code is broken. Step 6 runs last, so the workflow itself never publishes a failed release to the proxy.
 

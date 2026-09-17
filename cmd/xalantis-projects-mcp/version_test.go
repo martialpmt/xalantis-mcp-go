@@ -18,7 +18,7 @@ func TestResolveVersion(t *testing.T) {
 	}{
 		{"valeur injectée prioritaire", "v0.1.0", info("v9.9.9"), true, "v0.1.0"},
 		{"version du module (go install)", "", info("v0.2.0"), true, "v0.2.0"},
-		{"build local sans version", "", info("(devel)"), true, "dev"},
+		{"module sans version ((devel))", "", info("(devel)"), true, "dev"},
 		{"version de module vide", "", info(""), true, "dev"},
 		{"pas d'informations de build", "", nil, false, "dev"},
 		{"informations nulles", "", nil, true, "dev"},

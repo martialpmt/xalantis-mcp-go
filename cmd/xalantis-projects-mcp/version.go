@@ -7,7 +7,8 @@ import "runtime/debug"
 var version = ""
 
 // resolveVersion choisit la version annoncée : la valeur injectée, sinon la
-// version du module (go install …@vX.Y.Z), sinon "dev".
+// version du module (go install …@vX.Y.Z, ou pseudo-version git d'un build
+// local), sinon "dev" (build sans informations de version).
 func resolveVersion(injected string, info *debug.BuildInfo, ok bool) string {
 	if injected != "" {
 		return injected

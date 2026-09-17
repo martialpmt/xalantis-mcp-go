@@ -118,6 +118,13 @@ Placer le binaire dans un dossier du `PATH`. Sur macOS, un fichier téléchargé
 avec le navigateur est mis en quarantaine :
 `xattr -d com.apple.quarantine xalantis-projects-mcp`.
 
+Sous Windows (PowerShell), comparer l'empreinte avec la ligne correspondante de `checksums.txt`, puis extraire :
+
+```powershell
+Get-FileHash .\xalantis-projects-mcp_windows_amd64.zip -Algorithm SHA256
+Expand-Archive .\xalantis-projects-mcp_windows_amd64.zip -DestinationPath .
+```
+
 ### Avec Go (≥ 1.24)
 
 ```bash
@@ -174,7 +181,7 @@ internal/tools/              outils dédiés et génériques
 - Tests unitaires : `go test ./...`
 - Test de bout en bout : `go build -o xalantis-projects-mcp ./cmd/xalantis-projects-mcp && python3 test_mcp.py`
 - Vérifications locales (comme la CI) : `gofmt -l .`, `golangci-lint run`,
-  `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`,
+  `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...`,
   `sh .github/scripts/next-version_test.sh`
 - Build de release local : `goreleaser release --snapshot --clean` (résultat dans `dist/`).
 - Publier une version : GitHub → Actions → **Release** → *Run workflow* sur
