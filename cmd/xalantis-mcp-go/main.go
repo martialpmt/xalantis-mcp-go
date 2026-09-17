@@ -71,7 +71,7 @@ func main() {
 
 	srv := mcp.NewServer(serverName, ver, instructions)
 	srv.Register(tools.ProjectTools(client)...)
-	srv.Register(tools.GenericTools(client, cat, filesDir)...)
+	srv.Register(tools.GenericTools(client, cat, filesDir, false)...)
 	if err := srv.Serve(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

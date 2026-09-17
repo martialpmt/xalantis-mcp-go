@@ -23,7 +23,7 @@ func catalog(t *testing.T) *openapi.Catalog {
 
 func genericTool(t *testing.T, rec *recorder, dir, name string) mcp.Tool {
 	t.Helper()
-	return find(t, GenericTools(rec.client(), catalog(t), dir), name)
+	return find(t, GenericTools(rec.client(), catalog(t), dir, false), name)
 }
 
 // realDir résout dir via les liens symboliques, comme le fait la validation
@@ -102,7 +102,7 @@ func TestCallJSON(t *testing.T) {
 
 func TestCallQueryMapping(t *testing.T) {
 	rec := newRecorder(t, nil)
-	call := genericTool(t, rec, t.TempDir(), "xalantis_call_operation")
+	call := genericTool(t, rec, t.TempDir(), "xalantis_read_operation")
 	_, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_tasks",
 		"path_params":  map[string]any{"projectUuid": "p-1"},
@@ -125,6 +125,7 @@ func TestCallRejectsBadInputWithoutCallingAPI(t *testing.T) {
 	rec := newRecorder(t, nil)
 	dir := t.TempDir()
 	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	read := genericTool(t, rec, dir, "xalantis_read_operation")
 	file := filepath.Join(dir, "a.txt")
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil { //nolint:gosec // G306: fichier de test dans t.TempDir(), permissions sans conséquence
 		t.Fatal(err)
@@ -148,7 +149,11 @@ func TestCallRejectsBadInputWithoutCallingAPI(t *testing.T) {
 		"champ fichier inconnu": {"operation_id": "post_projects_By_projectUuid_imports", "path_params": map[string]any{"projectUuid": "p"}, "headers": map[string]any{"Idempotency-Key": "k"}, "files": map[string]any{"autre": file}},
 	}
 	for name, c := range cases {
-		if _, err := call.Handler(c); err == nil {
+		tool := call
+		if strings.HasPrefix(c["operation_id"].(string), "get_") {
+			tool = read
+		}
+		if _, err := tool.Handler(c); err == nil {
 			t.Errorf("%s : erreur attendue", name)
 		}
 	}
@@ -203,7 +208,7 @@ func downloadServer(t *testing.T, disposition string) *recorder {
 
 func download(t *testing.T, rec *recorder, dir string, extra map[string]any) map[string]any {
 	t.Helper()
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	in := map[string]any{
 		"operation_id": "get_projects_By_projectUuid_documents_By_attachmentUuid_download",
 		"path_params":  map[string]any{"projectUuid": "p-1", "attachmentUuid": "a-1"},
@@ -276,11 +281,12 @@ func TestCallEmptyAndTextResponses(t *testing.T) {
 		_, _ = w.Write([]byte("a,b\n1,2\n"))
 	})
 	call := genericTool(t, rec, t.TempDir(), "xalantis_call_operation")
+	read := genericTool(t, rec, t.TempDir(), "xalantis_read_operation")
 	out, err := call.Handler(map[string]any{"operation_id": "delete_tickets_By_uuid", "path_params": map[string]any{"uuid": "t-1"}})
 	if err != nil || out != "Succès (HTTP 204), réponse vide." {
 		t.Errorf("DELETE : %v %q", err, out)
 	}
-	out, err = call.Handler(map[string]any{"operation_id": "get_projects_By_projectUuid_exports", "path_params": map[string]any{"projectUuid": "p"}, "query": map[string]any{"format": "csv"}})
+	out, err = read.Handler(map[string]any{"operation_id": "get_projects_By_projectUuid_exports", "path_params": map[string]any{"projectUuid": "p"}, "query": map[string]any{"format": "csv"}})
 	if err != nil || out != "a,b\n1,2\n" {
 		t.Errorf("CSV : %v %q", err, out)
 	}
@@ -292,7 +298,7 @@ func TestSaveToAppliesToText(t *testing.T) {
 		_, _ = w.Write([]byte("a,b\n1,2\n"))
 	})
 	dir := t.TempDir()
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	target := filepath.Join(dir, "export.csv")
 	in := map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
@@ -443,7 +449,7 @@ func TestSaveToOutsideFolderRejected(t *testing.T) {
 	rec := newRecorder(t, nil)
 	dir := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "export.csv")
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	_, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
 		"path_params":  map[string]any{"projectUuid": "p"},
@@ -460,7 +466,7 @@ func TestSaveToOutsideFolderNonexistentParentHidesExistence(t *testing.T) {
 	rec := newRecorder(t, nil)
 	dir := t.TempDir()
 	outsideParent := filepath.Join(t.TempDir(), "does-not-exist-dir")
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	_, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
 		"path_params":  map[string]any{"projectUuid": "p"},
@@ -481,7 +487,7 @@ func TestSaveToSymlinkParentEscapeRejected(t *testing.T) {
 	if err := os.Symlink(outsideDir, link); err != nil {
 		t.Fatal(err)
 	}
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	_, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
 		"path_params":  map[string]any{"projectUuid": "p"},
@@ -503,7 +509,7 @@ func TestSaveToRelativeAccepted(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "sous"), 0o755); err != nil { //nolint:gosec // G301: dossier de test dans t.TempDir(), permissions sans conséquence
 		t.Fatal(err)
 	}
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	out, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
 		"path_params":  map[string]any{"projectUuid": "p"},
@@ -533,7 +539,7 @@ func TestSaveToRelativeAccepted(t *testing.T) {
 func TestSaveToMissingParentDir(t *testing.T) {
 	rec := newRecorder(t, nil)
 	dir := t.TempDir()
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	_, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
 		"path_params":  map[string]any{"projectUuid": "p"},
@@ -542,6 +548,94 @@ func TestSaveToMissingParentDir(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "introuvable") {
 		t.Fatalf("attendu « introuvable », obtenu : %v", err)
+	}
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
+	}
+}
+
+func TestToolAnnotations(t *testing.T) {
+	want := map[string]string{
+		"xalantis_search_operations":  "readOnlyHint",
+		"xalantis_describe_operation": "readOnlyHint",
+		"xalantis_read_operation":     "readOnlyHint",
+		"xalantis_call_operation":     "destructiveHint",
+	}
+	tools := GenericTools(nil, catalog(t), t.TempDir(), false)
+	if len(tools) != len(want) {
+		t.Fatalf("%d outils génériques, attendu %d", len(tools), len(want))
+	}
+	for _, tool := range tools {
+		if hint := want[tool.Name]; hint == "" || tool.Annotations[hint] != true {
+			t.Errorf("%s : annotations %v", tool.Name, tool.Annotations)
+		}
+	}
+	for _, tool := range ProjectTools(nil) {
+		if tool.Annotations["readOnlyHint"] != true {
+			t.Errorf("%s : readOnlyHint attendu, obtenu %v", tool.Name, tool.Annotations)
+		}
+	}
+}
+
+func TestReadAndCallRejectWrongMethod(t *testing.T) {
+	rec := newRecorder(t, nil)
+	dir := t.TempDir()
+	read := genericTool(t, rec, dir, "xalantis_read_operation")
+	call := genericTool(t, rec, dir, "xalantis_call_operation")
+
+	if _, err := read.Handler(map[string]any{"operation_id": "post_tickets"}); err == nil || err.Error() != "opération d'écriture : utilisez xalantis_call_operation" {
+		t.Errorf("lecture d'un POST : %v", err)
+	}
+	if _, err := call.Handler(map[string]any{"operation_id": "get_tickets"}); err == nil || err.Error() != "lecture : utilisez xalantis_read_operation" {
+		t.Errorf("écriture d'un GET : %v", err)
+	}
+	if _, err := read.Handler(map[string]any{"operation_id": "nope"}); err == nil || !strings.Contains(err.Error(), "opération inconnue") {
+		t.Errorf("opération inconnue : %v", err)
+	}
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
+	}
+}
+
+func TestReadOnlyMode(t *testing.T) {
+	rec := newRecorder(t, nil)
+	tools := GenericTools(rec.client(), catalog(t), t.TempDir(), true)
+	if len(tools) != 3 {
+		t.Fatalf("%d outils en lecture seule, attendu 3", len(tools))
+	}
+	for _, tool := range tools {
+		if tool.Name == "xalantis_call_operation" {
+			t.Fatal("xalantis_call_operation ne doit pas être exposé en lecture seule")
+		}
+	}
+
+	search := find(t, tools, "xalantis_search_operations")
+	out, err := search.Handler(map[string]any{"query": "ticket"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Count      int               `json:"count"`
+		Operations []openapi.Summary `json:"operations"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil || res.Count == 0 {
+		t.Fatalf("recherche : %v %s", err, out)
+	}
+	for _, op := range res.Operations {
+		if op.Method != "GET" {
+			t.Errorf("opération non GET en lecture seule : %+v", op)
+		}
+	}
+	if out, err := search.Handler(map[string]any{"query": "ticket", "method": "POST"}); err != nil || out != `{"count":0,"operations":[]}` {
+		t.Errorf("filtre POST : %v %s", err, out)
+	}
+	if out, err := search.Handler(map[string]any{}); err != nil || !strings.Contains(out, `{"area":"Tickets","operations":17}`) {
+		t.Errorf("domaines : %v %s", err, out)
+	}
+
+	read := find(t, tools, "xalantis_read_operation")
+	if _, err := read.Handler(map[string]any{"operation_id": "post_tickets"}); err == nil || err.Error() != "écriture désactivée (XALANTIS_READ_ONLY)" {
+		t.Errorf("écriture en lecture seule : %v", err)
 	}
 	if len(rec.requests) != 0 {
 		t.Errorf("%d appels API, attendu 0", len(rec.requests))
