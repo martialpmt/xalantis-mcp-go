@@ -20,7 +20,7 @@ func TestDoSendsAuthQueryHeadersAndBody(t *testing.T) {
 		gotBody = string(b)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"success":true}`))
+		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
 	defer srv.Close()
 
@@ -81,10 +81,10 @@ func TestDoErrors(t *testing.T) {
 			w.WriteHeader(http.StatusTooManyRequests)
 		case "/api/v1/forbidden":
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte(`  {"message":"scope manquant"}  `))
+			_, _ = w.Write([]byte(`  {"message":"scope manquant"}  `))
 		default:
 			w.WriteHeader(http.StatusUnprocessableEntity)
-			w.Write([]byte(long))
+			_, _ = w.Write([]byte(long))
 		}
 	}))
 	defer srv.Close()
@@ -105,7 +105,9 @@ func TestDoErrors(t *testing.T) {
 func TestMultipart(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "note.txt")
-	os.WriteFile(path, []byte("contenu"), 0o644)
+	if err := os.WriteFile(path, []byte("contenu"), 0o644); err != nil { //nolint:gosec // G306: fichier de test dans t.TempDir(), permissions sans conséquence
+		t.Fatal(err)
+	}
 
 	body, ct, err := Multipart(url.Values{"label": {"doc"}}, []FilePart{{Field: "files[]", Path: path}})
 	if err != nil {

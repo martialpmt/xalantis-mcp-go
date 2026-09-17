@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"paymetrust/xalantis-projects-mcp/internal/mcp"
-	"paymetrust/xalantis-projects-mcp/internal/openapi"
+	"github.com/martialpmt/xalantis-mcp-go/internal/mcp"
+	"github.com/martialpmt/xalantis-mcp-go/internal/openapi"
 )
 
 func catalog(t *testing.T) *openapi.Catalog {
@@ -66,10 +66,10 @@ func TestDescribeTool(t *testing.T) {
 }
 
 func TestCallJSON(t *testing.T) {
-	rec := newRecorder(t, func(w http.ResponseWriter, r *http.Request) {
+	rec := newRecorder(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"success":true,"data":{"uuid":"new"}}`))
+		_, _ = w.Write([]byte(`{"success":true,"data":{"uuid":"new"}}`))
 	})
 	call := genericTool(t, rec, t.TempDir(), "xalantis_call_operation")
 	out, err := call.Handler(map[string]any{
@@ -92,7 +92,9 @@ func TestCallJSON(t *testing.T) {
 		t.Errorf("en-têtes = %v", req.Header)
 	}
 	var body map[string]any
-	json.Unmarshal([]byte(rec.bodies[0]), &body)
+	if err := json.Unmarshal([]byte(rec.bodies[0]), &body); err != nil {
+		t.Fatalf("corps %s : %v", rec.bodies[0], err)
+	}
 	if body["title"] != "Nouvelle tâche" {
 		t.Errorf("corps = %s", rec.bodies[0])
 	}
@@ -124,7 +126,9 @@ func TestCallRejectsBadInputWithoutCallingAPI(t *testing.T) {
 	dir := t.TempDir()
 	call := genericTool(t, rec, dir, "xalantis_call_operation")
 	file := filepath.Join(dir, "a.txt")
-	os.WriteFile(file, []byte("x"), 0o644)
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil { //nolint:gosec // G306: fichier de test dans t.TempDir(), permissions sans conséquence
+		t.Fatal(err)
+	}
 
 	cases := map[string]map[string]any{
 		"opération inconnue":    {"operation_id": "get_contracts"},
@@ -162,12 +166,16 @@ func TestCallMultipartUpload(t *testing.T) {
 			t.Errorf("%d fichiers sous files[]", n)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"success":true}`))
+		_, _ = w.Write([]byte(`{"success":true}`))
 	})
 	dir := t.TempDir()
 	a, b := filepath.Join(dir, "a.pdf"), filepath.Join(dir, "b.pdf")
-	os.WriteFile(a, []byte("A"), 0o644)
-	os.WriteFile(b, []byte("B"), 0o644)
+	if err := os.WriteFile(a, []byte("A"), 0o644); err != nil { //nolint:gosec // G306: fichier de test dans t.TempDir(), permissions sans conséquence
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte("B"), 0o644); err != nil { //nolint:gosec // G306: fichier de test dans t.TempDir(), permissions sans conséquence
+		t.Fatal(err)
+	}
 	call := genericTool(t, rec, dir, "xalantis_call_operation")
 	_, err := call.Handler(map[string]any{
 		"operation_id": "post_projects_By_projectUuid_documents",
@@ -184,12 +192,12 @@ func TestCallMultipartUpload(t *testing.T) {
 }
 
 func downloadServer(t *testing.T, disposition string) *recorder {
-	return newRecorder(t, func(w http.ResponseWriter, r *http.Request) {
+	return newRecorder(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		if disposition != "" {
 			w.Header().Set("Content-Disposition", disposition)
 		}
-		w.Write([]byte("PDFDATA"))
+		_, _ = w.Write([]byte("PDFDATA"))
 	})
 }
 
@@ -225,7 +233,7 @@ func TestDownloadDefaultDirNoOverwrite(t *testing.T) {
 	if first["size"].(float64) != 7 || first["content_type"] != "application/octet-stream" {
 		t.Errorf("métadonnées : %v", first)
 	}
-	data, _ := os.ReadFile(filepath.Join(dir, "rapport.pdf"))
+	data, _ := os.ReadFile(filepath.Join(dir, "rapport.pdf")) //nolint:gosec // G304: chemin de test dans t.TempDir(), non contrôlé par un attaquant
 	if string(data) != "PDFDATA" {
 		t.Errorf("contenu : %q", data)
 	}
@@ -248,7 +256,7 @@ func TestDownloadMaliciousFilenameStaysInDir(t *testing.T) {
 func TestDownloadSaveTo(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "sous", "x.pdf")
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil { //nolint:gosec // G301: dossier de test dans t.TempDir(), permissions sans conséquence
 		t.Fatal(err)
 	}
 	res := download(t, downloadServer(t, ""), dir, map[string]any{"save_to": target})
@@ -265,7 +273,7 @@ func TestCallEmptyAndTextResponses(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-		w.Write([]byte("a,b\n1,2\n"))
+		_, _ = w.Write([]byte("a,b\n1,2\n"))
 	})
 	call := genericTool(t, rec, t.TempDir(), "xalantis_call_operation")
 	out, err := call.Handler(map[string]any{"operation_id": "delete_tickets_By_uuid", "path_params": map[string]any{"uuid": "t-1"}})
@@ -279,9 +287,9 @@ func TestCallEmptyAndTextResponses(t *testing.T) {
 }
 
 func TestSaveToAppliesToText(t *testing.T) {
-	rec := newRecorder(t, func(w http.ResponseWriter, r *http.Request) {
+	rec := newRecorder(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/csv")
-		w.Write([]byte("a,b\n1,2\n"))
+		_, _ = w.Write([]byte("a,b\n1,2\n"))
 	})
 	dir := t.TempDir()
 	call := genericTool(t, rec, dir, "xalantis_call_operation")
@@ -305,7 +313,7 @@ func TestSaveToAppliesToText(t *testing.T) {
 	if res["saved_to"] != wantFirst {
 		t.Errorf("saved_to = %v, attendu %s", res["saved_to"], wantFirst)
 	}
-	data, err := os.ReadFile(target)
+	data, err := os.ReadFile(target) //nolint:gosec // G304: chemin de test dans t.TempDir(), non contrôlé par un attaquant
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +363,7 @@ func TestCallUploadOutsideFolderRejected(t *testing.T) {
 	rec := newRecorder(t, nil)
 	dir := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "a.txt")
-	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil { //nolint:gosec // G306: fichier de test dans t.TempDir(), permissions sans conséquence
 		t.Fatal(err)
 	}
 	assertOutsideFolder(t, uploadCall(t, rec, dir, outside))
@@ -378,10 +386,12 @@ func TestCallUploadParentTraversalRejected(t *testing.T) {
 	rec := newRecorder(t, nil)
 	dir := t.TempDir()
 	outside := filepath.Join(filepath.Dir(dir), "evil.txt")
-	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil { //nolint:gosec // G306: fichier de test dans t.TempDir(), permissions sans conséquence
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Remove(outside) })
+	t.Cleanup(func() {
+		_ = os.Remove(outside) //nolint:gosec // G104: nettoyage de test, échec sans conséquence
+	})
 	assertOutsideFolder(t, uploadCall(t, rec, dir, "../evil.txt"))
 	if len(rec.requests) != 0 {
 		t.Errorf("%d appels API, attendu 0", len(rec.requests))
@@ -393,7 +403,7 @@ func TestCallUploadSymlinkEscapeRejected(t *testing.T) {
 	dir := t.TempDir()
 	outsideDir := t.TempDir()
 	target := filepath.Join(outsideDir, "secret.txt")
-	if err := os.WriteFile(target, []byte("s"), 0o644); err != nil {
+	if err := os.WriteFile(target, []byte("s"), 0o644); err != nil { //nolint:gosec // G306: fichier de test dans t.TempDir(), permissions sans conséquence
 		t.Fatal(err)
 	}
 	link := filepath.Join(dir, "link.txt")
@@ -415,10 +425,10 @@ func TestCallUploadRelativePathAccepted(t *testing.T) {
 			t.Errorf("%d fichiers sous files[]", n)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"success":true}`))
+		_, _ = w.Write([]byte(`{"success":true}`))
 	})
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.pdf"), []byte("A"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "a.pdf"), []byte("A"), 0o644); err != nil { //nolint:gosec // G306: fichier de test dans t.TempDir(), permissions sans conséquence
 		t.Fatal(err)
 	}
 	if err := uploadCall(t, rec, dir, "a.pdf"); err != nil {
@@ -485,12 +495,12 @@ func TestSaveToSymlinkParentEscapeRejected(t *testing.T) {
 }
 
 func TestSaveToRelativeAccepted(t *testing.T) {
-	rec := newRecorder(t, func(w http.ResponseWriter, r *http.Request) {
+	rec := newRecorder(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/csv")
-		w.Write([]byte("a,b\n1,2\n"))
+		_, _ = w.Write([]byte("a,b\n1,2\n"))
 	})
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "sous"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "sous"), 0o755); err != nil { //nolint:gosec // G301: dossier de test dans t.TempDir(), permissions sans conséquence
 		t.Fatal(err)
 	}
 	call := genericTool(t, rec, dir, "xalantis_call_operation")
@@ -511,7 +521,7 @@ func TestSaveToRelativeAccepted(t *testing.T) {
 	if res["saved_to"] != want {
 		t.Errorf("saved_to = %v, attendu %s", res["saved_to"], want)
 	}
-	data, err := os.ReadFile(want)
+	data, err := os.ReadFile(want) //nolint:gosec // G304: chemin de test dans t.TempDir(), non contrôlé par un attaquant
 	if err != nil {
 		t.Fatal(err)
 	}

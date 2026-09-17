@@ -3,8 +3,8 @@ package tools
 import (
 	"net/url"
 
-	"paymetrust/xalantis-projects-mcp/internal/mcp"
-	"paymetrust/xalantis-projects-mcp/internal/xalantis"
+	"github.com/martialpmt/xalantis-mcp-go/internal/mcp"
+	"github.com/martialpmt/xalantis-mcp-go/internal/xalantis"
 )
 
 func prop(t, desc string) map[string]any {

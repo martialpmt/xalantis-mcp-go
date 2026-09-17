@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"paymetrust/xalantis-projects-mcp/internal/mcp"
-	"paymetrust/xalantis-projects-mcp/internal/xalantis"
+	"github.com/martialpmt/xalantis-mcp-go/internal/mcp"
+	"github.com/martialpmt/xalantis-mcp-go/internal/xalantis"
 )
 
 // recorder est un faux serveur Xalantis qui mémorise les requêtes reçues.
@@ -32,7 +32,7 @@ func newRecorder(t *testing.T, h http.HandlerFunc) *recorder {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"success":true}`))
+		_, _ = w.Write([]byte(`{"success":true}`))
 	}))
 	t.Cleanup(r.srv.Close)
 	return r

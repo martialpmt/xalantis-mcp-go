@@ -1,5 +1,8 @@
 # xalantis-projects-mcp
 
+[![CI](https://github.com/martialpmt/xalantis-mcp-go/actions/workflows/ci.yml/badge.svg)](https://github.com/martialpmt/xalantis-mcp-go/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/martialpmt/xalantis-mcp-go.svg)](https://pkg.go.dev/github.com/martialpmt/xalantis-mcp-go)
+
 Serveur MCP local (stdio) pour l'API Xalantis. Il couvre 206 opérations :
 projets et tâches, service desk (tickets, automatisations, catégories, tags,
 SLA, escalades, réponses prédéfinies, disponibilité des agents) et catalogue
@@ -79,24 +82,66 @@ l'outil renvoie l'erreur.
 ## Prérequis
 
 - Une clé API Xalantis avec les scopes voulus (Xalantis → paramètres de la clé API).
-- macOS Apple Silicon pour le binaire fourni (`xalantis-projects-mcp`). Pour un
-  autre système : `go build -o xalantis-projects-mcp ./cmd/xalantis-projects-mcp`
-  (Go ≥ 1.24, aucune dépendance).
+- macOS ou Linux (amd64 ou arm64) pour le script d'installation ; Windows via
+  l'archive `.zip` des releases.
 
-## Installation (Claude Desktop, macOS)
+## Installation
 
-1. Poser ce dossier quelque part, par ex. `~/Documents/xalantis-projects-mcp/`.
-2. Rendre le binaire exécutable et lever la quarantaine macOS (fichier téléchargé) :
-   ```bash
-   chmod +x ~/Documents/xalantis-projects-mcp/xalantis-projects-mcp
-   xattr -d com.apple.quarantine ~/Documents/xalantis-projects-mcp/xalantis-projects-mcp 2>/dev/null
-   ```
-3. Claude Desktop → Réglages → Développeur → Éditer la config, ajouter dans `mcpServers` :
+### Script (macOS, Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/martialpmt/xalantis-mcp-go/main/install.sh | sh
+```
+
+Le script télécharge la release depuis GitHub, vérifie sa somme de contrôle
+(SHA-256) et installe le binaire dans `~/.local/bin`, sans `sudo`.
+Variables facultatives :
+
+- `VERSION` : version à installer (défaut `latest`), par ex.
+  `curl -fsSL … | VERSION=v0.1.0 sh` ;
+- `INSTALL_DIR` : dossier d'installation (défaut `~/.local/bin`).
+
+Vérification : `xalantis-projects-mcp --version`.
+
+### Téléchargement manuel (dont Windows)
+
+Sur la page [Releases](https://github.com/martialpmt/xalantis-mcp-go/releases),
+télécharger l'archive du système (`xalantis-projects-mcp_<os>_<arch>.tar.gz`,
+`.zip` pour Windows) et `checksums.txt`, puis :
+
+```bash
+shasum -a 256 -c checksums.txt --ignore-missing
+tar -xzf xalantis-projects-mcp_darwin_arm64.tar.gz xalantis-projects-mcp
+```
+
+Placer le binaire dans un dossier du `PATH`. Sur macOS, un fichier téléchargé
+avec le navigateur est mis en quarantaine :
+`xattr -d com.apple.quarantine xalantis-projects-mcp`.
+
+Sous Windows (PowerShell), comparer l'empreinte avec la ligne correspondante de `checksums.txt`, puis extraire :
+
+```powershell
+Get-FileHash .\xalantis-projects-mcp_windows_amd64.zip -Algorithm SHA256
+Expand-Archive .\xalantis-projects-mcp_windows_amd64.zip -DestinationPath .
+```
+
+### Avec Go (≥ 1.24)
+
+```bash
+go install github.com/martialpmt/xalantis-mcp-go/cmd/xalantis-projects-mcp@latest
+```
+
+Le binaire est installé dans `$(go env GOPATH)/bin`.
+
+## Configuration (Claude Desktop)
+
+1. Claude Desktop → Réglages → Développeur → Éditer la config, ajouter dans
+   `mcpServers` le chemin **absolu** du binaire (`~` n'est pas interprété) :
    ```json
    {
      "mcpServers": {
        "xalantis-projets": {
-         "command": "/Users/VOTRE_LOGIN/Documents/xalantis-projects-mcp/xalantis-projects-mcp",
+         "command": "/Users/VOTRE_LOGIN/.local/bin/xalantis-projects-mcp",
          "env": {
            "XALANTIS_API_KEY": "sk_live_VOTRE_CLE"
          }
@@ -106,7 +151,7 @@ l'outil renvoie l'erreur.
    ```
    (Si le fichier contient déjà le connecteur `xalantis`, ajouter simplement l'entrée
    `xalantis-projets` à côté, dans le même bloc `mcpServers`.)
-4. Quitter complètement Claude Desktop et le rouvrir.
+2. Quitter complètement Claude Desktop et le rouvrir.
 
 ## Variables d'environnement
 
@@ -135,6 +180,15 @@ internal/tools/              outils dédiés et génériques
   puis recompiler.
 - Tests unitaires : `go test ./...`
 - Test de bout en bout : `go build -o xalantis-projects-mcp ./cmd/xalantis-projects-mcp && python3 test_mcp.py`
+- Vérifications locales (comme la CI) : `gofmt -l .`, `golangci-lint run`,
+  `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...`,
+  `sh .github/scripts/next-version_test.sh`
+- Build de release local : `goreleaser release --snapshot --clean` (résultat dans `dist/`).
+- Publier une version : GitHub → Actions → **Release** → *Run workflow* sur
+  `main`, choisir `patch`, `minor` ou `major`. Le workflow relance la CI, crée
+  le tag `vX.Y.Z`, publie les binaires dans les Releases et enregistre le
+  module sur pkg.go.dev. Les versions restent en `v0.x`/`v1.x` (une `v2`
+  exigerait le suffixe `/v2` dans le chemin du module).
 
 ## Notes
 

@@ -1,0 +1,57 @@
+version: 2
+
+project_name: xalantis-projects-mcp
+
+builds:
+  - id: xalantis-projects-mcp
+    main: ./cmd/xalantis-projects-mcp
+    binary: xalantis-projects-mcp
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version=v{{ .Version }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^test"
+      - "^chore"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other changes
+      order: 999
+
+release:
+  github:
+    owner: martialpmt
+    name: xalantis-mcp-go
