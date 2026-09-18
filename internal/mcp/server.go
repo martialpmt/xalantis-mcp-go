@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"sync"
 )
 
 // ProtocolVersion est la version du protocole MCP annoncée à l'initialisation.
@@ -71,21 +72,44 @@ func textResult(text string, isErr bool) map[string]any {
 }
 
 // Serve lit une requête JSON-RPC par ligne sur r et écrit les réponses sur w,
-// jusqu'à la fin de r.
+// jusqu'à la fin de r. Chaque requête est traitée dans sa propre goroutine :
+// un téléchargement long ne bloque plus les appels suivants. JSON-RPC 2.0
+// autorise les réponses dans le désordre, le client les rapproche par id.
+// ponytail: une goroutine par requête, sans plafond ; ajouter un sémaphore si
+// un client en envoie des centaines à la fois.
 func (s *Server) Serve(r io.Reader, w io.Writer) error {
 	in := bufio.NewScanner(r)
 	in.Buffer(make([]byte, 0, 1<<20), 16<<20)
 	out := bufio.NewWriter(w)
 	enc := json.NewEncoder(out)
-	send := func(resp response) error {
+	// Les réponses partent de plusieurs goroutines : mu sérialise l'écriture
+	// et sendErr mémorise la première erreur d'envoi (stdout fermé).
+	var mu sync.Mutex
+	var sendErr error
+	send := func(resp response) {
 		resp.JSONRPC = "2.0"
-		if err := enc.Encode(resp); err != nil {
-			return err
+		mu.Lock()
+		defer mu.Unlock()
+		if sendErr != nil {
+			return
 		}
-		return out.Flush()
+		if err := enc.Encode(resp); err != nil {
+			sendErr = err
+			return
+		}
+		sendErr = out.Flush()
+	}
+	failed := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return sendErr != nil
 	}
 
+	var wg sync.WaitGroup
 	for in.Scan() {
+		if failed() {
+			break
+		}
 		line := strings.TrimSpace(in.Text())
 		if line == "" {
 			continue
@@ -99,17 +123,21 @@ func (s *Server) Serve(r io.Reader, w io.Writer) error {
 			if json.Valid([]byte(line)) {
 				rpcErr = &rpcError{Code: -32600, Message: "requête invalide"}
 			}
-			if err := send(response{ID: json.RawMessage("null"), Error: rpcErr}); err != nil {
-				return err
-			}
+			send(response{ID: json.RawMessage("null"), Error: rpcErr})
 			continue
 		}
 		if len(req.ID) == 0 || string(req.ID) == "null" {
 			continue // notification : jamais de réponse
 		}
-		if err := send(s.handle(req)); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			send(s.handle(req))
+		}()
+	}
+	wg.Wait()
+	if sendErr != nil {
+		return sendErr
 	}
 	return in.Err()
 }

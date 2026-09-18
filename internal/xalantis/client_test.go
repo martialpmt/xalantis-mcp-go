@@ -1,6 +1,7 @@
 package xalantis
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -73,7 +74,7 @@ func TestDoMissingKeyMakesNoCall(t *testing.T) {
 }
 
 func TestDoErrors(t *testing.T) {
-	long := strings.Repeat("x", 600)
+	long := strings.Repeat("x", MaxErrorBytes+100)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/limited":
@@ -97,7 +98,7 @@ func TestDoErrors(t *testing.T) {
 		t.Errorf("403: %v", err)
 	}
 	_, err := c.Get("/long", nil)
-	if err == nil || err.Error() != "API Xalantis HTTP 422 : "+long[:500] {
+	if err == nil || err.Error() != "API Xalantis HTTP 422 : "+long[:MaxErrorBytes] {
 		t.Errorf("422 tronqué: %v", err)
 	}
 }
@@ -182,5 +183,52 @@ func TestMultipart(t *testing.T) {
 
 	if _, _, err := Multipart(nil, []FilePart{{Field: "file", Path: filepath.Join(dir, "absent")}}); err == nil {
 		t.Error("fichier absent : erreur attendue")
+	}
+}
+
+// TestRetryGatewayAndDebug vérifie la seconde tentative sur 503 et la trace
+// de diagnostic : deux appels, une seule erreur remontée, deux lignes tracées.
+func TestRetryGatewayAndDebug(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	var log bytes.Buffer
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "k", Debug: &log})
+	body, err := c.Get("/flaky", nil)
+	if err != nil || body != `{"ok":true}` {
+		t.Fatalf("503 rejoué : body=%q err=%v", body, err)
+	}
+	if calls != 2 {
+		t.Errorf("appels = %d, attendu 2", calls)
+	}
+	if got := strings.Count(log.String(), "[xalantis] GET "); got != 2 {
+		t.Errorf("trace = %d lignes, attendu 2 :\n%s", got, log.String())
+	}
+	if strings.Contains(log.String(), "k") && strings.Contains(log.String(), "Bearer") {
+		t.Errorf("la trace ne doit pas porter la clé : %s", log.String())
+	}
+}
+
+// TestNoRetryOn500 : une erreur applicative n'est pas rejouée.
+func TestNoRetryOn500(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	if _, err := NewClient(Config{BaseURL: srv.URL, APIKey: "k"}).Get("/boum", nil); err == nil {
+		t.Fatal("500 doit rester une erreur")
+	}
+	if calls != 1 {
+		t.Errorf("appels = %d, attendu 1", calls)
 	}
 }

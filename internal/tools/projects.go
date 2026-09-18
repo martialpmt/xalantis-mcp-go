@@ -45,6 +45,19 @@ var (
 	destructiveHint = map[string]any{"destructiveHint": true}
 )
 
+// get exécute une lecture et applique le même plafond de taille que les
+// outils génériques : aucun outil ne renvoie au modèle plus que MaxTextBytes.
+func get(c *xalantis.Client, path string, q url.Values) (string, error) {
+	s, err := c.Get(path, q)
+	if err != nil {
+		return "", err
+	}
+	if len(s) > MaxTextBytes {
+		return "", tooLarge(len(s))
+	}
+	return s, nil
+}
+
 // ProjectTools renvoie les 7 outils de lecture des projets.
 func ProjectTools(c *xalantis.Client) []mcp.Tool {
 	projectUUID := map[string]any{"project_uuid": prop("string", "UUID du projet.")}
@@ -64,7 +77,7 @@ func ProjectTools(c *xalantis.Client) []mcp.Tool {
 				a.addStr(q, "search", "search")
 				a.addStr(q, "status", "status")
 				a.addBool(q, "include_archived", "include_archived")
-				return c.Get("/projects", q)
+				return get(c, "/projects", q)
 			},
 		},
 		{
@@ -105,7 +118,7 @@ func ProjectTools(c *xalantis.Client) []mcp.Tool {
 				a.addBool(q, "include_archived", "include_archived")
 				a.addStr(q, "sort_by", "sort_by")
 				a.addStr(q, "sort_direction", "sort_direction")
-				return c.Get("/projects/"+p+"/tasks", q)
+				return get(c, "/projects/"+p+"/tasks", q)
 			},
 		},
 		{
@@ -122,7 +135,7 @@ func ProjectTools(c *xalantis.Client) []mcp.Tool {
 				if err != nil {
 					return "", err
 				}
-				return c.Get("/projects/"+p+"/tasks/"+t, nil)
+				return get(c, "/projects/"+p+"/tasks/"+t, nil)
 			},
 		},
 		{
@@ -140,7 +153,7 @@ func ProjectTools(c *xalantis.Client) []mcp.Tool {
 					return "", err
 				}
 				a.paging(q)
-				return c.Get("/projects/"+p+"/tasks/"+t+"/activities", q)
+				return get(c, "/projects/"+p+"/tasks/"+t+"/activities", q)
 			},
 		},
 		{
@@ -154,7 +167,7 @@ func ProjectTools(c *xalantis.Client) []mcp.Tool {
 					return "", err
 				}
 				a.paging(q)
-				return c.Get("/projects/"+p+"/sprints", q)
+				return get(c, "/projects/"+p+"/sprints", q)
 			},
 		},
 		{
@@ -166,7 +179,7 @@ func ProjectTools(c *xalantis.Client) []mcp.Tool {
 				if err != nil {
 					return "", err
 				}
-				return c.Get("/projects/"+p+"/statuses", nil)
+				return get(c, "/projects/"+p+"/statuses", nil)
 			},
 		},
 		{
@@ -180,7 +193,7 @@ func ProjectTools(c *xalantis.Client) []mcp.Tool {
 					return "", err
 				}
 				a.paging(q)
-				return c.Get("/projects/"+p+"/members", q)
+				return get(c, "/projects/"+p+"/members", q)
 			},
 		},
 	}

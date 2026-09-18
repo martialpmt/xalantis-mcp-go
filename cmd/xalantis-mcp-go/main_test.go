@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestParseReadOnly(t *testing.T) {
+func TestParseBoolEnv(t *testing.T) {
 	cases := []struct {
 		in      string
 		want    bool
@@ -22,12 +22,12 @@ func TestParseReadOnly(t *testing.T) {
 		{"oui", false, true},
 	}
 	for _, c := range cases {
-		got, err := parseReadOnly(c.in)
+		got, err := parseBoolEnv("XALANTIS_READ_ONLY", c.in)
 		if got != c.want || (err != nil) != c.wantErr {
-			t.Errorf("parseReadOnly(%q) = %v, %v ; attendu %v, erreur %v", c.in, got, err, c.want, c.wantErr)
+			t.Errorf("parseBoolEnv(%q) = %v, %v ; attendu %v, erreur %v", c.in, got, err, c.want, c.wantErr)
 		}
 		if err != nil && !strings.Contains(err.Error(), "XALANTIS_READ_ONLY") {
-			t.Errorf("parseReadOnly(%q) : l'erreur doit nommer la variable : %v", c.in, err)
+			t.Errorf("parseBoolEnv(%q) : l'erreur doit nommer la variable : %v", c.in, err)
 		}
 	}
 }
