@@ -637,7 +637,7 @@ func TestReadOnlyMode(t *testing.T) {
 			t.Errorf("opération non GET en lecture seule : %+v", op)
 		}
 	}
-	if out, err := search.Handler(map[string]any{"query": "ticket", "method": "POST"}); err != nil || out != `{"count":0,"operations":[]}` {
+	if out, err := search.Handler(map[string]any{"query": "ticket", "method": "POST"}); err != nil || out != `{"count":0,"operations":[],"total":0}` {
 		t.Errorf("filtre POST : %v %s", err, out)
 	}
 	if out, err := search.Handler(map[string]any{}); err != nil || !strings.Contains(out, `{"area":"Tickets","operations":17}`) {
@@ -717,5 +717,48 @@ func TestBuildHeadersRequiredHeader(t *testing.T) {
 	h, generated, err := buildHeaders(op, map[string]any{"if-match": "v1"})
 	if err != nil || h["If-Match"] != "v1" || generated != "" {
 		t.Errorf("If-Match fourni : %v %v %q", h, err, generated)
+	}
+}
+
+// TestSearchReportsTruncation : une liste coupée doit annoncer le total et
+// dire quoi faire, sinon le modèle choisit dans un sous-ensemble en croyant
+// avoir vu toutes les opérations correspondantes.
+func TestSearchReportsTruncation(t *testing.T) {
+	rec := newRecorder(t, nil)
+	search := genericTool(t, rec, t.TempDir(), "xalantis_search_operations")
+
+	out, err := search.Handler(map[string]any{"area": "Projets et tâches"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deux variables : un Unmarshal ne remet pas à zéro les champs absents,
+	// et un hint fantôme du premier appel ferait passer le second à tort.
+	type result struct {
+		Count int    `json:"count"`
+		Total int    `json:"total"`
+		Hint  string `json:"hint"`
+	}
+	var res result
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("sortie illisible : %v %s", err, out)
+	}
+	if res.Count != openapi.MaxResults || res.Total <= res.Count {
+		t.Fatalf("cas tronqué attendu : count=%d total=%d", res.Count, res.Total)
+	}
+	if !strings.Contains(res.Hint, "affinez") {
+		t.Errorf("le hint doit dire quoi faire : %q", res.Hint)
+	}
+
+	// Liste complète : pas de hint, sinon il crie au loup.
+	out, err = search.Handler(map[string]any{"area": "Politiques SLA"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var full result
+	if err := json.Unmarshal([]byte(out), &full); err != nil {
+		t.Fatal(err)
+	}
+	if full.Hint != "" || full.Total != full.Count || full.Count == 0 {
+		t.Errorf("liste complète : hint=%q count=%d total=%d", full.Hint, full.Count, full.Total)
 	}
 }

@@ -107,7 +107,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := mcp.NewServer(serverName, ver, serverInstructions(readOnly))
+	srv := mcp.NewServer(serverName, ver, serverInstructions(readOnly), tools.MaxTextBytes)
 	srv.Register(tools.ProjectTools(client)...)
 	srv.Register(tools.GenericTools(client, cat, filesDir, readOnly)...)
 	if err := srv.Serve(os.Stdin, os.Stdout); err != nil {

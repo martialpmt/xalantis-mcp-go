@@ -80,12 +80,18 @@ func GenericTools(c *xalantis.Client, cat *openapi.Catalog, filesDir string, rea
 				}
 				if readOnly {
 					if method != "" && !strings.EqualFold(method, "GET") {
-						return toJSON(map[string]any{"count": 0, "operations": []openapi.Summary{}})
+						return toJSON(map[string]any{"count": 0, "total": 0, "operations": []openapi.Summary{}})
 					}
 					method = "GET"
 				}
-				res := cat.Search(query, area, method)
-				return toJSON(map[string]any{"count": len(res), "operations": res})
+				res, total := cat.Search(query, area, method)
+				out := map[string]any{"count": len(res), "total": total, "operations": res}
+				if total > len(res) {
+					// Une phrase impérative change le comportement du modèle
+					// là où un champ numérique de plus passe inaperçu.
+					out["hint"] = fmt.Sprintf("%d opérations correspondent, %d affichées : affinez query ou area.", total, len(res))
+				}
+				return toJSON(out)
 			},
 		},
 		{

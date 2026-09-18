@@ -39,7 +39,7 @@ func mustJSON(t *testing.T, v any) []byte {
 }
 
 func testServer() *Server {
-	s := NewServer("srv", "9.9.9", "fais ceci")
+	s := NewServer("srv", "9.9.9", "fais ceci", 0)
 	s.Register(
 		Tool{Name: "ok", InputSchema: map[string]any{"type": "object"}, Handler: func(a map[string]any) (string, error) {
 			return "bonjour " + a["who"].(string), nil
@@ -103,7 +103,7 @@ func TestToolsListAndCall(t *testing.T) {
 
 func TestNotificationsAndUnknownMethod(t *testing.T) {
 	called := false
-	s := NewServer("srv", "1", "")
+	s := NewServer("srv", "1", "", 0)
 	s.Register(Tool{Name: "spy", Handler: func(map[string]any) (string, error) { called = true; return "", nil }})
 	got := run(t, s,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
@@ -135,7 +135,7 @@ func TestNotificationsAndUnknownMethod(t *testing.T) {
 }
 
 func TestToolsListAnnotations(t *testing.T) {
-	s := NewServer("srv", "1", "")
+	s := NewServer("srv", "1", "", 0)
 	s.Register(
 		Tool{Name: "lire", Annotations: map[string]any{"readOnlyHint": true}},
 		Tool{Name: "brut"},
@@ -155,7 +155,7 @@ func TestToolsListAnnotations(t *testing.T) {
 // « lent » est bloqué. En traitement séquentiel, « lent » attend une libération
 // qui ne viendra qu'après lui : il expire et le test échoue au lieu de boucler.
 func TestCallsRunConcurrently(t *testing.T) {
-	s := NewServer("srv", "1", "")
+	s := NewServer("srv", "1", "", 0)
 	started, release := make(chan struct{}), make(chan struct{})
 	s.Register(
 		Tool{Name: "lent", InputSchema: map[string]any{"type": "object"}, Handler: func(map[string]any) (string, error) {
@@ -182,5 +182,38 @@ func TestCallsRunConcurrently(t *testing.T) {
 		if s := r["content"].([]any)[0].(map[string]any)["text"].(string); s != want {
 			t.Errorf("id %s : %q, attendu %q", id, s, want)
 		}
+	}
+}
+
+// TestOutputSizeLimit : le plafond s'applique à tout outil, y compris ceux
+// qui ne passent par aucune réponse HTTP. Refus et non troncature : un JSON
+// coupé serait invalide.
+func TestOutputSizeLimit(t *testing.T) {
+	s := NewServer("srv", "1", "", 100)
+	s.Register(
+		Tool{Name: "bavard", InputSchema: map[string]any{"type": "object"}, Handler: func(map[string]any) (string, error) {
+			return strings.Repeat("x", 101), nil
+		}},
+		Tool{Name: "concis", InputSchema: map[string]any{"type": "object"}, Handler: func(map[string]any) (string, error) {
+			return strings.Repeat("x", 100), nil
+		}},
+	)
+	got := run(t, s,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"bavard"}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"concis"}}`,
+	)
+	text := func(id string) (string, bool) {
+		r := got[id]["result"].(map[string]any)
+		return r["content"].([]any)[0].(map[string]any)["text"].(string), r["isError"].(bool)
+	}
+	out, isErr := text("1")
+	if !isErr || !strings.Contains(out, "bavard") || !strings.Contains(out, "trop volumineuse") {
+		t.Errorf("dépassement : %q %v", out, isErr)
+	}
+	if len(out) > 200 {
+		t.Errorf("l'erreur ne doit pas reprendre la sortie : %d octets", len(out))
+	}
+	if out, isErr := text("2"); isErr || len(out) != 100 {
+		t.Errorf("pile à la limite : %d octets, isError=%v", len(out), isErr)
 	}
 }
