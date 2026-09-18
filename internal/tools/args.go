@@ -58,9 +58,16 @@ func (a args) addArr(q url.Values, argKey, queryKey string) {
 	}
 }
 
+// maxPerPage est le plafond annoncé par l'API et par les descriptions
+// d'outils. Le respecter côté serveur évite une page géante qui finirait
+// refusée par tooLarge après un aller-retour inutile.
+const maxPerPage = 100
+
 func (a args) paging(q url.Values) {
 	a.addInt(q, "page", "page")
-	a.addInt(q, "per_page", "per_page")
+	if v, ok := a["per_page"].(float64); ok && v > 0 {
+		q.Set("per_page", strconv.Itoa(min(int(v), maxPerPage)))
+	}
 }
 
 // checkSegment valide une valeur destinée à un segment de chemin d'URL.

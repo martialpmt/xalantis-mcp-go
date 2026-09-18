@@ -40,15 +40,15 @@ func serverInstructions(readOnly bool) string {
 	return s + "xalantis_read_operation pour une lecture (GET) ou xalantis_call_operation pour une écriture."
 }
 
-// parseReadOnly lit XALANTIS_READ_ONLY : vide = désactivé.
-func parseReadOnly(v string) (bool, error) {
+// parseBoolEnv lit une variable d'environnement booléenne : vide = désactivée.
+func parseBoolEnv(name, v string) (bool, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return false, nil
 	}
 	b, err := strconv.ParseBool(v)
 	if err != nil {
-		return false, fmt.Errorf("XALANTIS_READ_ONLY invalide (%q) : utilisez true/false ou 1/0", v)
+		return false, fmt.Errorf("%s invalide (%q) : utilisez true/false ou 1/0", name, v)
 	}
 	return b, nil
 }
@@ -62,7 +62,12 @@ func main() {
 		return
 	}
 
-	readOnly, err := parseReadOnly(os.Getenv("XALANTIS_READ_ONLY"))
+	readOnly, err := parseBoolEnv("XALANTIS_READ_ONLY", os.Getenv("XALANTIS_READ_ONLY"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	debug, err := parseBoolEnv("XALANTIS_DEBUG", os.Getenv("XALANTIS_DEBUG"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -73,11 +78,16 @@ func main() {
 		fmt.Fprintln(os.Stderr, "spécification OpenAPI embarquée illisible :", err)
 		os.Exit(1)
 	}
-	client := xalantis.NewClient(xalantis.Config{
+	cfg := xalantis.Config{
 		BaseURL:   os.Getenv("XALANTIS_BASE_URL"),
 		APIKey:    os.Getenv("XALANTIS_API_KEY"),
 		UserAgent: serverName + "/" + ver,
-	})
+	}
+	if debug {
+		// stdout porte le protocole MCP : la trace va sur stderr.
+		cfg.Debug = os.Stderr
+	}
+	client := xalantis.NewClient(cfg)
 
 	filesDir := os.Getenv("XALANTIS_FILES_DIR")
 	if filesDir == "" {

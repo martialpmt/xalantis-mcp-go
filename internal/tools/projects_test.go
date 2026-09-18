@@ -106,3 +106,33 @@ func TestProjectToolsRejectBadUUID(t *testing.T) {
 		t.Errorf("%d appels API, attendu 0", len(rec.requests))
 	}
 }
+
+// TestPerPageCapped : une demande démesurée est ramenée au plafond de l'API
+// plutôt que d'aller chercher une page que tooLarge refuserait ensuite.
+func TestPerPageCapped(t *testing.T) {
+	rec := newRecorder(t, nil)
+	tool := find(t, ProjectTools(rec.client()), "xalantis_list_projects")
+	if _, err := tool.Handler(map[string]any{"per_page": float64(5000)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.requests[0].URL.Query().Get("per_page"); got != "100" {
+		t.Errorf("per_page = %s, attendu 100", got)
+	}
+}
+
+// TestDedicatedToolsCapResponseSize : les outils dédiés appliquent le même
+// plafond que les outils génériques, sinon une liste géante sature le contexte.
+func TestDedicatedToolsCapResponseSize(t *testing.T) {
+	rec := newRecorder(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"x":"` + strings.Repeat("y", MaxTextBytes) + `"}`))
+	})
+	tool := find(t, ProjectTools(rec.client()), "xalantis_list_projects")
+	_, err := tool.Handler(map[string]any{})
+	if err == nil || !strings.Contains(err.Error(), "trop volumineuse") {
+		t.Fatalf("plafond non appliqué : %v", err)
+	}
+	if !strings.Contains(err.Error(), "per_page") {
+		t.Errorf("l'erreur doit dire comment s'en sortir : %v", err)
+	}
+}

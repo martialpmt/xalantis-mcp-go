@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // run envoie des lignes au serveur et renvoie les réponses indexées par id.
@@ -147,5 +148,39 @@ func TestToolsListAnnotations(t *testing.T) {
 	}
 	if _, ok := brut["annotations"]; ok {
 		t.Fatalf("annotations vides : champ absent attendu, obtenu %v", brut)
+	}
+}
+
+// TestCallsRunConcurrently : « rapide » doit pouvoir s'exécuter pendant que
+// « lent » est bloqué. En traitement séquentiel, « lent » attend une libération
+// qui ne viendra qu'après lui : il expire et le test échoue au lieu de boucler.
+func TestCallsRunConcurrently(t *testing.T) {
+	s := NewServer("srv", "1", "")
+	started, release := make(chan struct{}), make(chan struct{})
+	s.Register(
+		Tool{Name: "lent", InputSchema: map[string]any{"type": "object"}, Handler: func(map[string]any) (string, error) {
+			close(started)
+			select {
+			case <-release:
+				return "lent fini", nil
+			case <-time.After(5 * time.Second):
+				return "", errors.New("traitement séquentiel : « lent » bloque les appels suivants")
+			}
+		}},
+		Tool{Name: "rapide", InputSchema: map[string]any{"type": "object"}, Handler: func(map[string]any) (string, error) {
+			<-started // « lent » a forcément démarré : en séquentiel il a déjà rendu la main
+			close(release)
+			return "rapide fini", nil
+		}},
+	)
+	got := run(t, s,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"lent"}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"rapide"}}`,
+	)
+	for id, want := range map[string]string{"1": "lent fini", "2": "rapide fini"} {
+		r := got[id]["result"].(map[string]any)
+		if s := r["content"].([]any)[0].(map[string]any)["text"].(string); s != want {
+			t.Errorf("id %s : %q, attendu %q", id, s, want)
+		}
 	}
 }

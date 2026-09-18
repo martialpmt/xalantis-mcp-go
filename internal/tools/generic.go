@@ -21,8 +21,19 @@ import (
 	"github.com/martialpmt/xalantis-mcp-go/internal/xalantis"
 )
 
-// MaxTextBytes borne une réponse texte renvoyée au client MCP.
-const MaxTextBytes = 10 << 20
+// MaxTextBytes borne une réponse texte renvoyée au client MCP. La limite
+// utile n'est pas la mémoire mais la fenêtre de contexte du modèle : 200 Ko
+// représentent déjà des dizaines de milliers de jetons. Au-delà, une erreur
+// qui dit de paginer vaut mieux qu'une réponse qui sature le contexte ; pour
+// garder l'intégralité des données, utiliser save_to.
+const MaxTextBytes = 200 << 10
+
+// tooLarge est l'erreur commune à tous les outils quand une réponse texte
+// dépasse MaxTextBytes : aucun outil ne renvoie plus que ça au modèle.
+func tooLarge(n int) error {
+	return fmt.Errorf("réponse texte trop volumineuse (%d octets, limite %d) : paginez (per_page), affinez les filtres, "+
+		"ou passez par xalantis_read_operation avec save_to pour l'enregistrer en fichier", n, MaxTextBytes)
+}
 
 func toJSON(v any) (string, error) {
 	b, err := json.Marshal(v)
@@ -251,7 +262,7 @@ func callOperation(c *xalantis.Client, cat *openapi.Catalog, filesDir string, a 
 	}
 	if saveTo == "" && isText(resp.Header.Get("Content-Type")) {
 		if len(resp.Body) > MaxTextBytes {
-			return "", fmt.Errorf("réponse texte trop volumineuse (%d octets) : affinez les filtres ou paginez", len(resp.Body))
+			return "", tooLarge(len(resp.Body))
 		}
 		return string(resp.Body), nil
 	}

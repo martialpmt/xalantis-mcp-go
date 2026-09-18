@@ -183,6 +183,10 @@ Le binaire est installé dans `$(go env GOPATH)/bin`.
 - `XALANTIS_READ_ONLY` (optionnel) — `1`/`true` : le serveur n'expose
   pas `xalantis_call_operation` et la recherche ne renvoie que des
   lectures ; défaut `false`. Une valeur invalide empêche le démarrage.
+- `XALANTIS_DEBUG` (optionnel) — `1`/`true` : trace chaque appel HTTP
+  (méthode, URL, statut, durée) sur la sortie d'erreur, sans jamais la clé
+  API ; défaut `false`. Utile pour diagnostiquer un outil qui échoue : dans
+  Claude Desktop, la trace apparaît dans les journaux du serveur MCP.
 
 ## Développement
 
@@ -212,10 +216,16 @@ internal/tools/              outils dédiés et génériques
 
 - Rate limit API : 60 requêtes/minute par clé. Le serveur rejoue la requête
   une fois si l'en-tête `Retry-After` demande 20 s ou moins ; au-delà, il
-  remonte l'erreur avec le délai à attendre.
-- Réponses limitées à 100 Mo (fichiers) et 10 Mo (texte renvoyé à Claude).
+  remonte l'erreur avec le délai à attendre. Il rejoue aussi une fois après
+  une erreur réseau passagère ou un 502/503/504 ; les écritures portant une
+  `Idempotency-Key`, ce second essai ne crée pas de doublon. Un 500 n'est
+  jamais rejoué.
+- Réponses limitées à 100 Mo (fichiers) et 200 Ko (texte renvoyé à Claude,
+  la contrainte étant la fenêtre de contexte). Au-delà : paginer
+  (`per_page`, plafonné à 100), affiner les filtres, ou utiliser `save_to`
+  pour enregistrer la réponse en fichier.
 - Délais : 30 s pour les en-têtes de réponse, 5 minutes pour la requête
   entière (téléchargements). Un client MCP abandonne souvent un appel au
   bout d'une minute : un gros téléchargement peut donc être signalé comme
-  annulé alors que le fichier a bien été enregistré. Le serveur traite un
-  appel à la fois, donc un téléchargement long retarde les suivants.
+  annulé alors que le fichier a bien été enregistré. Les appels sont traités
+  en parallèle : un téléchargement long ne retarde plus les suivants.

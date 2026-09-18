@@ -22,6 +22,11 @@ const DefaultBaseURL = "https://xalantis.com"
 // ponytail: réponse entière en mémoire ; passer au streaming si des fichiers > 100 Mo apparaissent.
 const MaxBodyBytes = 100 << 20
 
+// MaxErrorBytes borne le corps d'erreur repris dans le message. Assez large
+// pour qu'un 422 de validation garde la liste des champs fautifs, qui est
+// justement ce qui permet de corriger l'appel et de le rejouer.
+const MaxErrorBytes = 2000
+
 const (
 	// headerTimeout borne l'attente des en-têtes de réponse : une API muette
 	// échoue vite. requestTimeout borne l'ensemble, corps compris, pour
@@ -33,16 +38,20 @@ const (
 )
 
 // Config regroupe les paramètres du client, lus une seule fois par main.
+// Debug, quand il n'est pas nil, reçoit une ligne par appel HTTP (jamais
+// stdout, réservé au protocole MCP, et jamais la clé API).
 type Config struct {
 	BaseURL   string
 	APIKey    string
 	UserAgent string
+	Debug     io.Writer
 }
 
 // Client appelle l'API Xalantis.
 type Client struct {
 	baseURL, apiKey, userAgent string
 	http                       *http.Client
+	debug                      io.Writer
 }
 
 // NewClient crée un client ; BaseURL vide = DefaultBaseURL.
@@ -58,6 +67,7 @@ func NewClient(cfg Config) *Client {
 		apiKey:    cfg.APIKey,
 		userAgent: cfg.UserAgent,
 		http:      &http.Client{Timeout: requestTimeout, Transport: tr},
+		debug:     cfg.Debug,
 	}
 }
 
@@ -89,25 +99,30 @@ func (c *Client) Do(method, path string, query url.Values, headers map[string]st
 		}
 	}
 
+	// Une seule nouvelle tentative : erreur réseau passagère, passerelle
+	// indisponible (502/503/504), ou 429 dont l'attente reste courte. Les
+	// écritures portent une Idempotency-Key, donc rejouer ne duplique rien.
 	resp, data, err := c.send(method, u, headers, payload, contentType)
+	if err != nil || retryable(resp.StatusCode) {
+		wait, ok := time.Second, true
+		if err == nil && resp.StatusCode == http.StatusTooManyRequests {
+			wait, ok = retryWait(resp.Header.Get("Retry-After"))
+		}
+		if ok {
+			time.Sleep(wait)
+			resp, data, err = c.send(method, u, headers, payload, contentType)
+		}
+	}
 	if err != nil {
 		return nil, err
-	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		if wait, ok := retryWait(resp.Header.Get("Retry-After")); ok {
-			time.Sleep(wait)
-			if resp, data, err = c.send(method, u, headers, payload, contentType); err != nil {
-				return nil, err
-			}
-		}
 	}
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return nil, fmt.Errorf("rate limit atteint (60 req/min) — réessayez dans %s s", resp.Header.Get("Retry-After"))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		msg := strings.TrimSpace(string(data))
-		if len(msg) > 500 {
-			msg = msg[:500]
+		if len(msg) > MaxErrorBytes {
+			msg = msg[:MaxErrorBytes]
 		}
 		return nil, fmt.Errorf("API Xalantis HTTP %d : %s", resp.StatusCode, msg)
 	}
@@ -139,7 +154,15 @@ func (c *Client) send(method, u string, headers map[string]string, payload []byt
 		req.Header.Set(k, v)
 	}
 
+	start := time.Now()
 	resp, err := c.http.Do(req)
+	if c.debug != nil {
+		status := "échec réseau"
+		if err == nil {
+			status = resp.Status
+		}
+		fmt.Fprintf(c.debug, "[xalantis] %s %s → %s (%s)\n", method, u, status, time.Since(start).Round(time.Millisecond))
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("appel API impossible : %v", err)
 	}
@@ -149,6 +172,16 @@ func (c *Client) send(method, u string, headers map[string]string, payload []byt
 		return nil, nil, err
 	}
 	return resp, data, nil
+}
+
+// retryable dit si un statut mérite une seconde tentative. 500 en est exclu :
+// une erreur applicative se reproduira, et l'API a pu appliquer l'écriture.
+func retryable(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
 }
 
 // retryWait renvoie l'attente avant de rejouer un 429 : la valeur de
