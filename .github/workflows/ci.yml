@@ -113,6 +113,10 @@ jobs:
           cache: false
       - name: go build
         run: go build ./...
+      - name: test de bout en bout
+        run: |
+          go build -o xalantis-mcp-go ./cmd/xalantis-mcp-go
+          python3 test_mcp.py
 
   scripts:
     runs-on: ubuntu-latest
