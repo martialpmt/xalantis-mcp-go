@@ -114,11 +114,18 @@ func TestNotificationsAndUnknownMethod(t *testing.T) {
 	if called {
 		t.Fatal("une notification ne doit pas exécuter d'outil")
 	}
-	if len(got) != 1 {
-		t.Fatalf("une seule réponse attendue, obtenu %v", got)
+	if len(got) != 2 {
+		t.Fatalf("deux réponses attendues (erreur d'analyse + méthode inconnue), obtenu %v", got)
+	}
+	if code := got["null"]["error"].(map[string]any)["code"].(float64); code != -32700 {
+		t.Fatalf("JSON illisible: %v", got["null"])
 	}
 	if code := got[`"a"`]["error"].(map[string]any)["code"].(float64); code != -32601 {
 		t.Fatalf("méthode inconnue: %v", got)
+	}
+	bad := run(t, s, `["tableau"]`)
+	if code := bad["null"]["error"].(map[string]any)["code"].(float64); code != -32600 {
+		t.Fatalf("JSON valide mais pas une requête: %v", bad)
 	}
 	init := run(t, s, `{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
 	if _, ok := init["1"]["result"].(map[string]any)["instructions"]; ok {

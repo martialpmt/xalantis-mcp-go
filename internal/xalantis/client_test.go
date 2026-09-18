@@ -102,6 +102,55 @@ func TestDoErrors(t *testing.T) {
 	}
 }
 
+// retryServer répond 429 à la première requête (avec Retry-After), puis 200.
+// Il mémorise les corps reçus.
+func retryServer(t *testing.T, retryAfter string) (*httptest.Server, *[]string) {
+	t.Helper()
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		if len(bodies) == 1 {
+			w.Header().Set("Retry-After", retryAfter)
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &bodies
+}
+
+func post(c *Client) (*Response, error) {
+	return c.Do(http.MethodPost, "/tickets", nil, nil, strings.NewReader(`{"x":1}`), "application/json")
+}
+
+func TestDoRetriesOnceAfterShortRateLimit(t *testing.T) {
+	srv, bodies := retryServer(t, "0")
+	resp, err := post(NewClient(Config{BaseURL: srv.URL, APIKey: "k"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(resp.Body) != `{"success":true}` {
+		t.Errorf("réponse = %s", resp.Body)
+	}
+	if len(*bodies) != 2 || (*bodies)[1] != `{"x":1}` {
+		t.Errorf("corps reçus = %q, attendu deux fois {\"x\":1}", *bodies)
+	}
+}
+
+func TestDoDoesNotRetryLongRateLimit(t *testing.T) {
+	srv, bodies := retryServer(t, "21")
+	_, err := post(NewClient(Config{BaseURL: srv.URL, APIKey: "k"}))
+	if err == nil || !strings.Contains(err.Error(), "réessayez dans 21 s") {
+		t.Errorf("erreur = %v", err)
+	}
+	if len(*bodies) != 1 {
+		t.Errorf("%d requêtes, attendu 1", len(*bodies))
+	}
+}
+
 func TestMultipart(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "note.txt")

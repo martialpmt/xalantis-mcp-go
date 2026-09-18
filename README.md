@@ -210,5 +210,12 @@ internal/tools/              outils dédiés et génériques
 
 ## Notes
 
-- Rate limit API : 60 requêtes/minute par clé — le serveur remonte l'erreur avec le délai à attendre.
+- Rate limit API : 60 requêtes/minute par clé. Le serveur rejoue la requête
+  une fois si l'en-tête `Retry-After` demande 20 s ou moins ; au-delà, il
+  remonte l'erreur avec le délai à attendre.
 - Réponses limitées à 100 Mo (fichiers) et 10 Mo (texte renvoyé à Claude).
+- Délais : 30 s pour les en-têtes de réponse, 5 minutes pour la requête
+  entière (téléchargements). Un client MCP abandonne souvent un appel au
+  bout d'une minute : un gros téléchargement peut donc être signalé comme
+  annulé alors que le fichier a bien été enregistré. Le serveur traite un
+  appel à la fois, donc un téléchargement long retarde les suivants.

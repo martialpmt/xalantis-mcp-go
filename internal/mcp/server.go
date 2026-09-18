@@ -92,7 +92,17 @@ func (s *Server) Serve(r io.Reader, w io.Writer) error {
 		}
 		var req request
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
-			continue // ligne illisible : on ignore
+			// JSON invalide : -32700 ; JSON valide mais pas une requête
+			// (tableau, chaîne…) : -32600. Sans id connu, la réponse
+			// porte id null, comme le prévoit JSON-RPC 2.0.
+			rpcErr := &rpcError{Code: -32700, Message: "erreur d'analyse JSON"}
+			if json.Valid([]byte(line)) {
+				rpcErr = &rpcError{Code: -32600, Message: "requête invalide"}
+			}
+			if err := send(response{ID: json.RawMessage("null"), Error: rpcErr}); err != nil {
+				return err
+			}
+			continue
 		}
 		if len(req.ID) == 0 || string(req.ID) == "null" {
 			continue // notification : jamais de réponse
