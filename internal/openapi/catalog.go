@@ -254,10 +254,13 @@ func fold(s string) string {
 }
 
 // Search renvoie les opérations dont l'identifiant, le chemin ou le résumé
-// contiennent tous les mots de query, filtrées par domaine et méthode.
-func (c *Catalog) Search(query, area, method string) []Summary {
+// contiennent tous les mots de query, filtrées par domaine et méthode, ainsi
+// que le nombre total de correspondances. Au plus MaxResults sont renvoyées :
+// sans le total, une liste coupée est indiscernable d'une liste complète et
+// le modèle choisit dans un sous-ensemble en croyant avoir tout vu.
+func (c *Catalog) Search(query, area, method string) ([]Summary, int) {
 	words := strings.Fields(fold(query))
-	out := []Summary{}
+	out, total := []Summary{}, 0
 	for _, op := range c.ops {
 		if area != "" && fold(op.Area) != fold(area) {
 			continue
@@ -276,12 +279,12 @@ func (c *Catalog) Search(query, area, method string) []Summary {
 		if !match {
 			continue
 		}
-		out = append(out, Summary{OperationID: op.ID, Method: op.Method, Path: op.Path, Summary: op.Summary, Scope: op.Scope})
-		if len(out) == MaxResults {
-			break
+		total++
+		if len(out) < MaxResults {
+			out = append(out, Summary{OperationID: op.ID, Method: op.Method, Path: op.Path, Summary: op.Summary, Scope: op.Scope})
 		}
 	}
-	return out
+	return out, total
 }
 
 // Description est la vue détaillée d'une opération.

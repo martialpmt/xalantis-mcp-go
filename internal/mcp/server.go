@@ -5,6 +5,7 @@ package mcp
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -29,13 +30,18 @@ type Tool struct {
 // Server est un serveur MCP stdio.
 type Server struct {
 	name, version, instructions string
+	maxText                     int
 	tools                       []Tool
 	byName                      map[string]Tool
 }
 
-// NewServer crée un serveur sans outil.
-func NewServer(name, version, instructions string) *Server {
-	return &Server{name: name, version: version, instructions: instructions, byName: map[string]Tool{}}
+// NewServer crée un serveur sans outil. maxText borne la taille du texte
+// qu'un outil peut renvoyer au client ; 0 = pas de limite. C'est un plancher
+// commun à tous les outils, y compris ceux qui ne passent pas par une
+// réponse HTTP (description d'opération, recherche) : sans lui, un schéma
+// volumineux saturerait la fenêtre de contexte du modèle.
+func NewServer(name, version, instructions string, maxText int) *Server {
+	return &Server{name: name, version: version, instructions: instructions, maxText: maxText, byName: map[string]Tool{}}
 }
 
 // Register ajoute des outils, dans l'ordre donné.
@@ -179,6 +185,13 @@ func (s *Server) handle(req request) response {
 		text, err := tool.Handler(params.Arguments)
 		if err != nil {
 			return response{ID: req.ID, Result: textResult("Erreur : "+err.Error(), true)}
+		}
+		// Refuser plutôt que tronquer : une sortie JSON coupée serait
+		// invalide, donc plus coûteuse à exploiter qu'une erreur explicite.
+		if s.maxText > 0 && len(text) > s.maxText {
+			return response{ID: req.ID, Result: textResult(fmt.Sprintf(
+				"Erreur : sortie de %s trop volumineuse (%d octets, limite %d).",
+				params.Name, len(text), s.maxText), true)}
 		}
 		return response{ID: req.ID, Result: textResult(text, false)}
 	}

@@ -37,7 +37,7 @@ Outils génériques, pour toutes les autres opérations, à utiliser dans cet or
 
 | Outil | Rôle |
 |---|---|
-| `xalantis_search_operations` | 1. Trouver une opération (mots-clés, domaine, méthode). Sans filtre : liste des domaines. |
+| `xalantis_search_operations` | 1. Trouver une opération (mots-clés, domaine, méthode). Sans filtre : liste des domaines. Renvoie `count`, `total` et, si la liste est coupée à 50, un rappel d'affiner la recherche. |
 | `xalantis_describe_operation` | 2. Voir ses paramètres et le schéma de son corps. |
 | `xalantis_read_operation` | 3. Exécuter une lecture (GET) : `path_params`, `query`, `headers`, `save_to`. |
 | `xalantis_call_operation` | 3. Exécuter une écriture (POST, PUT, PATCH, DELETE) : mêmes arguments, plus `body` et `files`. Absent avec `XALANTIS_READ_ONLY=1`. |
@@ -223,7 +223,9 @@ internal/tools/              outils dédiés et génériques
 - Réponses limitées à 100 Mo (fichiers) et 200 Ko (texte renvoyé à Claude,
   la contrainte étant la fenêtre de contexte). Au-delà : paginer
   (`per_page`, plafonné à 100), affiner les filtres, ou utiliser `save_to`
-  pour enregistrer la réponse en fichier.
+  pour enregistrer la réponse en fichier. Ce plafond de 200 Ko s'applique à
+  la sortie de n'importe quel outil, y compris une description d'opération :
+  elle est refusée, jamais tronquée, pour ne pas produire de JSON invalide.
 - Délais : 30 s pour les en-têtes de réponse, 5 minutes pour la requête
   entière (téléchargements). Un client MCP abandonne souvent un appel au
   bout d'une minute : un gros téléchargement peut donc être signalé comme

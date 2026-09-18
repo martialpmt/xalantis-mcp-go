@@ -69,7 +69,7 @@ func TestOperationFields(t *testing.T) {
 func TestSearch(t *testing.T) {
 	c := loadEmbedded(t)
 
-	res := c.Search("creer ticket", "", "post")
+	res, _ := c.Search("creer ticket", "", "post")
 	found := false
 	for _, r := range res {
 		if r.OperationID == "post_tickets" {
@@ -83,7 +83,7 @@ func TestSearch(t *testing.T) {
 		t.Errorf("post_tickets introuvable sans accents : %+v", res)
 	}
 
-	esc := c.Search("", "politiques d'escalade", "")
+	esc, _ := c.Search("", "politiques d'escalade", "")
 	if len(esc) != 3 {
 		t.Errorf("escalade (apostrophe droite) = %d, attendu 3", len(esc))
 	}
@@ -92,14 +92,20 @@ func TestSearch(t *testing.T) {
 			t.Errorf("filtre domaine ignoré : %+v", r)
 		}
 	}
-	if n := len(c.Search("", "Politiques d’escalade", "")); n != 3 {
-		t.Errorf("escalade = %d, attendu 3", n)
+	if res, total := c.Search("", "Politiques d’escalade", ""); len(res) != 3 || total != 3 {
+		t.Errorf("escalade = %d sur %d, attendu 3 et 3", len(res), total)
 	}
-	if n := len(c.Search("", "", "")); n != MaxResults {
-		t.Errorf("limite = %d, attendu %d", n, MaxResults)
+	// Liste coupée : le total doit rester celui de toutes les correspondances,
+	// sinon rien ne distingue une page complète d'une page tronquée.
+	res, total := c.Search("", "", "")
+	if len(res) != MaxResults {
+		t.Errorf("limite = %d, attendu %d", len(res), MaxResults)
 	}
-	if res := c.Search("introuvable-xyz", "", ""); res == nil || len(res) != 0 {
-		t.Errorf("aucun résultat : liste vide attendue, obtenu %#v", res)
+	if total != c.Len() {
+		t.Errorf("total = %d, attendu %d", total, c.Len())
+	}
+	if res, total := c.Search("introuvable-xyz", "", ""); res == nil || len(res) != 0 || total != 0 {
+		t.Errorf("aucun résultat : liste vide attendue, obtenu %#v (total %d)", res, total)
 	}
 }
 
