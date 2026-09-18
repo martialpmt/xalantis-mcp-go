@@ -7,6 +7,7 @@
 //	XALANTIS_BASE_URL  (optionnel)   — défaut : https://xalantis.com
 //	XALANTIS_FILES_DIR (optionnel)   — dossier autorisé pour les fichiers locaux (envoi, save_to,
 //	                                    téléchargements) ; défaut : <dossier personnel>/Downloads/xalantis
+//	XALANTIS_READ_ONLY (optionnel)   — true/1 : n'expose aucune opération d'écriture ; défaut : false
 //
 // Compilation : go build -o xalantis-mcp-go ./cmd/xalantis-mcp-go
 // Version : xalantis-mcp-go --version
@@ -17,6 +18,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/martialpmt/xalantis-mcp-go/internal/mcp"
 	"github.com/martialpmt/xalantis-mcp-go/internal/openapi"
@@ -24,12 +27,31 @@ import (
 	"github.com/martialpmt/xalantis-mcp-go/internal/xalantis"
 )
 
-const (
-	serverName   = "xalantis-mcp-go"
-	instructions = "Pour les lectures courantes de projets, utilisez les 7 outils dédiés (xalantis_list_projects, xalantis_list_tasks…). " +
-		"Pour toute autre opération Xalantis (tickets, SLA, catalogue, écriture sur les projets…) : " +
-		"xalantis_search_operations, puis xalantis_describe_operation, puis xalantis_call_operation."
-)
+const serverName = "xalantis-mcp-go"
+
+// serverInstructions renvoie les consignes d'initialisation MCP.
+func serverInstructions(readOnly bool) string {
+	s := "Pour les lectures courantes de projets, utilisez les 7 outils dédiés (xalantis_list_projects, xalantis_list_tasks…). " +
+		"Pour toute autre opération Xalantis (tickets, SLA, catalogue…) : " +
+		"xalantis_search_operations, puis xalantis_describe_operation, puis "
+	if readOnly {
+		return s + "xalantis_read_operation. Mode lecture seule (XALANTIS_READ_ONLY) : les écritures sont désactivées."
+	}
+	return s + "xalantis_read_operation pour une lecture (GET) ou xalantis_call_operation pour une écriture."
+}
+
+// parseReadOnly lit XALANTIS_READ_ONLY : vide = désactivé.
+func parseReadOnly(v string) (bool, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return false, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("XALANTIS_READ_ONLY invalide (%q) : utilisez true/false ou 1/0", v)
+	}
+	return b, nil
+}
 
 func main() {
 	showVersion := flag.Bool("version", false, "affiche la version et quitte")
@@ -38,6 +60,12 @@ func main() {
 	if *showVersion {
 		fmt.Println(ver)
 		return
+	}
+
+	readOnly, err := parseReadOnly(os.Getenv("XALANTIS_READ_ONLY"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	cat, err := openapi.Load()
@@ -69,9 +97,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := mcp.NewServer(serverName, ver, instructions)
+	srv := mcp.NewServer(serverName, ver, serverInstructions(readOnly))
 	srv.Register(tools.ProjectTools(client)...)
-	srv.Register(tools.GenericTools(client, cat, filesDir)...)
+	srv.Register(tools.GenericTools(client, cat, filesDir, readOnly)...)
 	if err := srv.Serve(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Test du serveur MCP : mock de l'API Xalantis + dialogue JSON-RPC via stdio."""
-import json, os, subprocess, sys, tempfile, threading
+import json, os, re, subprocess, sys, tempfile, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -94,27 +94,33 @@ msgs = [
          "operation_id": "post_projects_By_projectUuid_tasks", "path_params": {"projectUuid": "p-1"},
          "headers": {"Idempotency-Key": "idem-42"}, "body": {"title": "Nouvelle tâche"}}}},
     {"jsonrpc": "2.0", "id": 14, "method": "tools/call",
-     "params": {"name": "xalantis_call_operation", "arguments": {
+     "params": {"name": "xalantis_read_operation", "arguments": {
          "operation_id": "get_projects_By_projectUuid_documents_By_attachmentUuid_download",
          "path_params": {"projectUuid": "p-1", "attachmentUuid": "a-1"}}}},
     {"jsonrpc": "2.0", "id": 15, "method": "tools/call",
      "params": {"name": "xalantis_call_operation", "arguments": {
          "operation_id": "post_projects_By_projectUuid_tasks", "path_params": {"projectUuid": "p-1"},
-         "body": {"title": "sans clé"}}}},  # Idempotency-Key requise -> erreur sans appel API
+         "body": {"title": "sans clé"}}}},  # Idempotency-Key absente -> générée
+    {"jsonrpc": "2.0", "id": 16, "method": "tools/call",
+     "params": {"name": "xalantis_read_operation", "arguments": {
+         "operation_id": "post_projects_By_projectUuid_tasks", "path_params": {"projectUuid": "p-1"}}}},  # écriture via l'outil de lecture -> erreur sans appel API
 ]
-stdin_data = "".join(json.dumps(m) + "\n" for m in msgs)
 
 home = tempfile.mkdtemp()
-proc = subprocess.run(
-    ["./xalantis-mcp-go"],
-    input=stdin_data, capture_output=True, text=True, timeout=30,
-    env={"XALANTIS_API_KEY": "sk_live_test", "XALANTIS_BASE_URL": f"http://127.0.0.1:{port}", "PATH": "/usr/bin", "HOME": home},
-)
-resp = {}
-for line in proc.stdout.splitlines():
-    if line.strip():
-        d = json.loads(line)
-        resp[d.get("id")] = d
+
+def run_server(messages, **env):
+    return subprocess.run(
+        ["./xalantis-mcp-go"],
+        input="".join(json.dumps(m) + "\n" for m in messages), capture_output=True, text=True, timeout=30,
+        env={"XALANTIS_API_KEY": "sk_live_test", "XALANTIS_BASE_URL": f"http://127.0.0.1:{port}",
+             "PATH": "/usr/bin", "HOME": home, **env},
+    )
+
+def responses(p):
+    return {d.get("id"): d for d in (json.loads(l) for l in p.stdout.splitlines() if l.strip())}
+
+proc = run_server(msgs)
+resp = responses(proc)
 
 ok = True
 def check(cond, label):
@@ -124,9 +130,12 @@ def check(cond, label):
 
 check(resp[1]["result"]["serverInfo"]["name"] == "xalantis-mcp-go", "initialize")
 check(resp[2]["result"] == {}, "ping")
-tools = {t["name"] for t in resp[3]["result"]["tools"]}
-check(len(tools) == 10 and {"xalantis_list_tasks", "xalantis_call_operation"} <= tools, f"tools/list ({len(tools)} outils)")
-check("xalantis_search_operations" in resp[1]["result"].get("instructions", ""), "instructions d'initialisation")
+annotations = {t["name"]: t.get("annotations", {}) for t in resp[3]["result"]["tools"]}
+check(len(annotations) == 11, f"tools/list ({len(annotations)} outils)")
+check(annotations["xalantis_read_operation"] == {"readOnlyHint": True}
+      and annotations["xalantis_list_tasks"] == {"readOnlyHint": True}
+      and annotations["xalantis_call_operation"] == {"destructiveHint": True}, "annotations des outils")
+check("xalantis_read_operation" in resp[1]["result"].get("instructions", ""), "instructions d'initialisation")
 r4 = json.loads(resp[4]["result"]["content"][0]["text"])
 check(r4["_query"] == {"search": ["IAP"]} and r4["data"][0]["key"] == "IAP", "list_projects + query")
 r5 = json.loads(resp[5]["result"]["content"][0]["text"])
@@ -151,12 +160,29 @@ check(r13["data"]["uuid"] == "tk-1" and POSTS and POSTS[0] == {
     "body": {"title": "Nouvelle tâche"}}, "call_operation POST JSON")
 r14 = json.loads(resp[14]["result"]["content"][0]["text"])
 saved = os.path.join(home, "Downloads", "xalantis", "rapport.pdf")
-check(r14["saved_to"] == saved and open(saved, "rb").read() == b"%PDF-test", "call_operation téléchargement")
-check(resp[15]["result"]["isError"] and "Idempotency-Key" in resp[15]["result"]["content"][0]["text"], "Idempotency-Key requise")
+check(r14["saved_to"] == saved and open(saved, "rb").read() == b"%PDF-test", "read_operation téléchargement")
+check(not resp[15]["result"]["isError"] and len(POSTS) == 2
+      and re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", POSTS[1]["idem"] or "")
+      and POSTS[1]["body"] == {"title": "sans clé"}, "Idempotency-Key générée")
+check(resp[16]["result"]["isError"] and "xalantis_call_operation" in resp[16]["result"]["content"][0]["text"],
+      "read_operation refuse une écriture")
 check(all(a == "Bearer sk_live_test" for _, a in REQUESTS), "header Authorization sur chaque appel")
-check(len(REQUESTS) == 5, f"{len(REQUESTS)} appels API (les entrées invalides n'atteignent pas l'API)")
+check(len(REQUESTS) == 6, f"{len(REQUESTS)} appels API (les entrées invalides n'atteignent pas l'API)")
 check(os.path.isdir(os.path.join(home, "Downloads", "xalantis")), "dossier XALANTIS_FILES_DIR créé au démarrage")
 check(proc.stderr.strip() == "", "stderr vide")
+
+ro_msgs = [msgs[0], {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+           {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+               "name": "xalantis_call_operation", "arguments": {"operation_id": "post_projects_By_projectUuid_tasks"}}}]
+ro = responses(run_server(ro_msgs, XALANTIS_READ_ONLY="1"))
+ro_tools = {t["name"] for t in ro[2]["result"]["tools"]}
+check(len(ro_tools) == 10 and "xalantis_call_operation" not in ro_tools, "lecture seule : outil d'écriture absent")
+check(ro[3]["result"]["isError"] and "outil inconnu" in ro[3]["result"]["content"][0]["text"],
+      "lecture seule : appel d'écriture refusé")
+check("XALANTIS_READ_ONLY" in ro[1]["result"]["instructions"], "lecture seule : instructions")
+check(len(REQUESTS) == 6, "lecture seule : aucun appel API")
+bad = run_server(msgs[:1], XALANTIS_READ_ONLY="oui")
+check(bad.returncode == 1 and "XALANTIS_READ_ONLY" in bad.stderr, "XALANTIS_READ_ONLY invalide refusée")
 
 srv.shutdown()
 sys.exit(0 if ok else 1)

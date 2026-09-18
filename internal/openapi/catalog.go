@@ -209,11 +209,14 @@ type AreaCount struct {
 	Operations int    `json:"operations"`
 }
 
-// AreaCounts renvoie les domaines dans l'ordre de Areas.
-func (c *Catalog) AreaCounts() []AreaCount {
+// AreaCounts renvoie les domaines dans l'ordre de Areas, en ne comptant que
+// les opérations de la méthode method (vide = toutes).
+func (c *Catalog) AreaCounts(method string) []AreaCount {
 	counts := map[string]int{}
 	for _, op := range c.ops {
-		counts[op.Area]++
+		if method == "" || op.Method == strings.ToUpper(method) {
+			counts[op.Area]++
+		}
 	}
 	var out []AreaCount
 	for _, a := range Areas {

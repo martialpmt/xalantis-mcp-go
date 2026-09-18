@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func catalog(t *testing.T) *openapi.Catalog {
 
 func genericTool(t *testing.T, rec *recorder, dir, name string) mcp.Tool {
 	t.Helper()
-	return find(t, GenericTools(rec.client(), catalog(t), dir), name)
+	return find(t, GenericTools(rec.client(), catalog(t), dir, false), name)
 }
 
 // realDir résout dir via les liens symboliques, comme le fait la validation
@@ -102,7 +103,7 @@ func TestCallJSON(t *testing.T) {
 
 func TestCallQueryMapping(t *testing.T) {
 	rec := newRecorder(t, nil)
-	call := genericTool(t, rec, t.TempDir(), "xalantis_call_operation")
+	call := genericTool(t, rec, t.TempDir(), "xalantis_read_operation")
 	_, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_tasks",
 		"path_params":  map[string]any{"projectUuid": "p-1"},
@@ -125,6 +126,7 @@ func TestCallRejectsBadInputWithoutCallingAPI(t *testing.T) {
 	rec := newRecorder(t, nil)
 	dir := t.TempDir()
 	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	read := genericTool(t, rec, dir, "xalantis_read_operation")
 	file := filepath.Join(dir, "a.txt")
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil { //nolint:gosec // G306: fichier de test dans t.TempDir(), permissions sans conséquence
 		t.Fatal(err)
@@ -139,7 +141,6 @@ func TestCallRejectsBadInputWithoutCallingAPI(t *testing.T) {
 		"requête inconnue":      {"operation_id": "get_tickets", "query": map[string]any{"nope": "1"}},
 		"requête objet":         {"operation_id": "get_tickets", "query": "pas un objet"},
 		"en-tête interdit":      {"operation_id": "get_tickets", "headers": map[string]any{"Authorization": "x"}},
-		"en-tête requis":        {"operation_id": "post_projects_By_projectUuid_documents", "path_params": map[string]any{"projectUuid": "p"}, "files": map[string]any{"files": file}},
 		"fichier sur JSON":      {"operation_id": "post_tickets", "files": map[string]any{"file": file}},
 		"corps sur GET":         {"operation_id": "get_tickets", "body": map[string]any{"a": 1}},
 		"fichier absent":        {"operation_id": "post_projects_By_projectUuid_imports", "path_params": map[string]any{"projectUuid": "p"}, "headers": map[string]any{"Idempotency-Key": "k"}, "files": map[string]any{"file": filepath.Join(dir, "absent")}},
@@ -148,7 +149,11 @@ func TestCallRejectsBadInputWithoutCallingAPI(t *testing.T) {
 		"champ fichier inconnu": {"operation_id": "post_projects_By_projectUuid_imports", "path_params": map[string]any{"projectUuid": "p"}, "headers": map[string]any{"Idempotency-Key": "k"}, "files": map[string]any{"autre": file}},
 	}
 	for name, c := range cases {
-		if _, err := call.Handler(c); err == nil {
+		tool := call
+		if strings.HasPrefix(c["operation_id"].(string), "get_") {
+			tool = read
+		}
+		if _, err := tool.Handler(c); err == nil {
 			t.Errorf("%s : erreur attendue", name)
 		}
 	}
@@ -203,7 +208,7 @@ func downloadServer(t *testing.T, disposition string) *recorder {
 
 func download(t *testing.T, rec *recorder, dir string, extra map[string]any) map[string]any {
 	t.Helper()
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	in := map[string]any{
 		"operation_id": "get_projects_By_projectUuid_documents_By_attachmentUuid_download",
 		"path_params":  map[string]any{"projectUuid": "p-1", "attachmentUuid": "a-1"},
@@ -276,11 +281,12 @@ func TestCallEmptyAndTextResponses(t *testing.T) {
 		_, _ = w.Write([]byte("a,b\n1,2\n"))
 	})
 	call := genericTool(t, rec, t.TempDir(), "xalantis_call_operation")
+	read := genericTool(t, rec, t.TempDir(), "xalantis_read_operation")
 	out, err := call.Handler(map[string]any{"operation_id": "delete_tickets_By_uuid", "path_params": map[string]any{"uuid": "t-1"}})
 	if err != nil || out != "Succès (HTTP 204), réponse vide." {
 		t.Errorf("DELETE : %v %q", err, out)
 	}
-	out, err = call.Handler(map[string]any{"operation_id": "get_projects_By_projectUuid_exports", "path_params": map[string]any{"projectUuid": "p"}, "query": map[string]any{"format": "csv"}})
+	out, err = read.Handler(map[string]any{"operation_id": "get_projects_By_projectUuid_exports", "path_params": map[string]any{"projectUuid": "p"}, "query": map[string]any{"format": "csv"}})
 	if err != nil || out != "a,b\n1,2\n" {
 		t.Errorf("CSV : %v %q", err, out)
 	}
@@ -292,7 +298,7 @@ func TestSaveToAppliesToText(t *testing.T) {
 		_, _ = w.Write([]byte("a,b\n1,2\n"))
 	})
 	dir := t.TempDir()
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	target := filepath.Join(dir, "export.csv")
 	in := map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
@@ -443,7 +449,7 @@ func TestSaveToOutsideFolderRejected(t *testing.T) {
 	rec := newRecorder(t, nil)
 	dir := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "export.csv")
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	_, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
 		"path_params":  map[string]any{"projectUuid": "p"},
@@ -460,7 +466,7 @@ func TestSaveToOutsideFolderNonexistentParentHidesExistence(t *testing.T) {
 	rec := newRecorder(t, nil)
 	dir := t.TempDir()
 	outsideParent := filepath.Join(t.TempDir(), "does-not-exist-dir")
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	_, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
 		"path_params":  map[string]any{"projectUuid": "p"},
@@ -481,7 +487,7 @@ func TestSaveToSymlinkParentEscapeRejected(t *testing.T) {
 	if err := os.Symlink(outsideDir, link); err != nil {
 		t.Fatal(err)
 	}
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	_, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
 		"path_params":  map[string]any{"projectUuid": "p"},
@@ -503,7 +509,7 @@ func TestSaveToRelativeAccepted(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "sous"), 0o755); err != nil { //nolint:gosec // G301: dossier de test dans t.TempDir(), permissions sans conséquence
 		t.Fatal(err)
 	}
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	out, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
 		"path_params":  map[string]any{"projectUuid": "p"},
@@ -533,7 +539,7 @@ func TestSaveToRelativeAccepted(t *testing.T) {
 func TestSaveToMissingParentDir(t *testing.T) {
 	rec := newRecorder(t, nil)
 	dir := t.TempDir()
-	call := genericTool(t, rec, dir, "xalantis_call_operation")
+	call := genericTool(t, rec, dir, "xalantis_read_operation")
 	_, err := call.Handler(map[string]any{
 		"operation_id": "get_projects_By_projectUuid_exports",
 		"path_params":  map[string]any{"projectUuid": "p"},
@@ -545,5 +551,171 @@ func TestSaveToMissingParentDir(t *testing.T) {
 	}
 	if len(rec.requests) != 0 {
 		t.Errorf("%d appels API, attendu 0", len(rec.requests))
+	}
+}
+
+func TestToolAnnotations(t *testing.T) {
+	want := map[string]string{
+		"xalantis_search_operations":  "readOnlyHint",
+		"xalantis_describe_operation": "readOnlyHint",
+		"xalantis_read_operation":     "readOnlyHint",
+		"xalantis_call_operation":     "destructiveHint",
+	}
+	tools := GenericTools(nil, catalog(t), t.TempDir(), false)
+	if len(tools) != len(want) {
+		t.Fatalf("%d outils génériques, attendu %d", len(tools), len(want))
+	}
+	for _, tool := range tools {
+		if hint := want[tool.Name]; hint == "" || tool.Annotations[hint] != true {
+			t.Errorf("%s : annotations %v", tool.Name, tool.Annotations)
+		}
+		if tool.Name == "xalantis_read_operation" || tool.Name == "xalantis_call_operation" {
+			props := tool.InputSchema["properties"].(map[string]any)
+			desc := props["headers"].(map[string]any)["description"].(string)
+			mentionsIdem := strings.Contains(desc, "Idempotency-Key")
+			if tool.Name == "xalantis_call_operation" && !mentionsIdem {
+				t.Errorf("%s : description de headers sans Idempotency-Key : %q", tool.Name, desc)
+			}
+			if tool.Name == "xalantis_read_operation" && mentionsIdem {
+				t.Errorf("%s : description de headers mentionne Idempotency-Key : %q", tool.Name, desc)
+			}
+		}
+	}
+	for _, tool := range ProjectTools(nil) {
+		if tool.Annotations["readOnlyHint"] != true {
+			t.Errorf("%s : readOnlyHint attendu, obtenu %v", tool.Name, tool.Annotations)
+		}
+	}
+}
+
+func TestReadAndCallRejectWrongMethod(t *testing.T) {
+	rec := newRecorder(t, nil)
+	dir := t.TempDir()
+	read := genericTool(t, rec, dir, "xalantis_read_operation")
+	call := genericTool(t, rec, dir, "xalantis_call_operation")
+
+	if _, err := read.Handler(map[string]any{"operation_id": "post_tickets"}); err == nil || err.Error() != "opération d'écriture : utilisez xalantis_call_operation" {
+		t.Errorf("lecture d'un POST : %v", err)
+	}
+	if _, err := call.Handler(map[string]any{"operation_id": "get_tickets"}); err == nil || err.Error() != "lecture : utilisez xalantis_read_operation" {
+		t.Errorf("écriture d'un GET : %v", err)
+	}
+	if _, err := read.Handler(map[string]any{"operation_id": "nope"}); err == nil || !strings.Contains(err.Error(), "opération inconnue") {
+		t.Errorf("opération inconnue : %v", err)
+	}
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
+	}
+}
+
+func TestReadOnlyMode(t *testing.T) {
+	rec := newRecorder(t, nil)
+	tools := GenericTools(rec.client(), catalog(t), t.TempDir(), true)
+	if len(tools) != 3 {
+		t.Fatalf("%d outils en lecture seule, attendu 3", len(tools))
+	}
+	for _, tool := range tools {
+		if tool.Name == "xalantis_call_operation" {
+			t.Fatal("xalantis_call_operation ne doit pas être exposé en lecture seule")
+		}
+	}
+
+	search := find(t, tools, "xalantis_search_operations")
+	out, err := search.Handler(map[string]any{"query": "ticket"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Count      int               `json:"count"`
+		Operations []openapi.Summary `json:"operations"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil || res.Count == 0 {
+		t.Fatalf("recherche : %v %s", err, out)
+	}
+	for _, op := range res.Operations {
+		if op.Method != "GET" {
+			t.Errorf("opération non GET en lecture seule : %+v", op)
+		}
+	}
+	if out, err := search.Handler(map[string]any{"query": "ticket", "method": "POST"}); err != nil || out != `{"count":0,"operations":[]}` {
+		t.Errorf("filtre POST : %v %s", err, out)
+	}
+	if out, err := search.Handler(map[string]any{}); err != nil || !strings.Contains(out, `{"area":"Tickets","operations":17}`) {
+		t.Errorf("domaines : %v %s", err, out)
+	}
+
+	read := find(t, tools, "xalantis_read_operation")
+	if _, err := read.Handler(map[string]any{"operation_id": "post_tickets"}); err == nil || err.Error() != "écriture désactivée (XALANTIS_READ_ONLY)" {
+		t.Errorf("écriture en lecture seule : %v", err)
+	}
+	if len(rec.requests) != 0 {
+		t.Errorf("%d appels API, attendu 0", len(rec.requests))
+	}
+}
+
+var uuidV4 = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+func newTaskInput() map[string]any {
+	return map[string]any{
+		"operation_id": "post_projects_By_projectUuid_tasks",
+		"path_params":  map[string]any{"projectUuid": "p-1"},
+		"body":         map[string]any{"title": "x"},
+	}
+}
+
+func TestCallGeneratesIdempotencyKey(t *testing.T) {
+	rec := newRecorder(t, nil)
+	call := genericTool(t, rec, t.TempDir(), "xalantis_call_operation")
+	blank := newTaskInput()
+	blank["headers"] = map[string]any{"Idempotency-Key": "  "}
+	for _, in := range []map[string]any{newTaskInput(), newTaskInput(), blank} {
+		if _, err := call.Handler(in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys := make([]string, len(rec.requests))
+	for i, r := range rec.requests {
+		keys[i] = r.Header.Get("Idempotency-Key")
+		if !uuidV4.MatchString(keys[i]) {
+			t.Errorf("appel %d : clé %q, UUID v4 attendu", i, keys[i])
+		}
+	}
+	if keys[0] == keys[1] {
+		t.Errorf("deux appels, même clé générée : %s", keys[0])
+	}
+}
+
+func TestCallFailureReportsGeneratedKey(t *testing.T) {
+	rec := newRecorder(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"boum"}`))
+	})
+	call := genericTool(t, rec, t.TempDir(), "xalantis_call_operation")
+
+	_, err := call.Handler(newTaskInput())
+	sent := rec.requests[0].Header.Get("Idempotency-Key")
+	want := "(Idempotency-Key générée : " + sent + " — réutilisez-la pour relancer la même requête ; si le corps change, omettez-la)"
+	if err == nil || !strings.Contains(err.Error(), "HTTP 500") || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("erreur = %v, attendu le suffixe %q", err, want)
+	}
+
+	given := newTaskInput()
+	given["headers"] = map[string]any{"Idempotency-Key": "idem-1"}
+	if _, err := call.Handler(given); err == nil || strings.Contains(err.Error(), "générée") {
+		t.Errorf("clé fournie : %v", err)
+	}
+	if got := rec.requests[1].Header.Get("Idempotency-Key"); got != "idem-1" {
+		t.Errorf("clé fournie envoyée = %q, attendu %q", got, "idem-1")
+	}
+}
+
+func TestBuildHeadersRequiredHeader(t *testing.T) {
+	op := &openapi.Operation{ID: "op", Params: []openapi.Param{{Name: "If-Match", In: "header", Required: true}}}
+	if _, _, err := buildHeaders(op, nil); err == nil || err.Error() != "en-tête requis manquant : If-Match" {
+		t.Errorf("If-Match manquant : %v", err)
+	}
+	h, generated, err := buildHeaders(op, map[string]any{"if-match": "v1"})
+	if err != nil || h["If-Match"] != "v1" || generated != "" {
+		t.Errorf("If-Match fourni : %v %v %q", h, err, generated)
 	}
 }

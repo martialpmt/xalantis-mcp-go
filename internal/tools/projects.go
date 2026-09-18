@@ -38,11 +38,18 @@ var pagingProps = map[string]any{
 	"per_page": prop("integer", "Résultats par page, 1 à 100."),
 }
 
+// Indices MCP : un client peut approuver les lectures automatiquement et
+// demander confirmation avant une écriture.
+var (
+	readOnlyHint    = map[string]any{"readOnlyHint": true}
+	destructiveHint = map[string]any{"destructiveHint": true}
+)
+
 // ProjectTools renvoie les 7 outils de lecture des projets.
 func ProjectTools(c *xalantis.Client) []mcp.Tool {
 	projectUUID := map[string]any{"project_uuid": prop("string", "UUID du projet.")}
 	taskUUID := map[string]any{"task_uuid": prop("string", "UUID de la tâche.")}
-	return []mcp.Tool{
+	tools := []mcp.Tool{
 		{
 			Name:        "xalantis_list_projects",
 			Description: "Liste les projets Xalantis accessibles (lecture seule). Filtres : recherche, statut, projets archivés.",
@@ -177,4 +184,8 @@ func ProjectTools(c *xalantis.Client) []mcp.Tool {
 			},
 		},
 	}
+	for i := range tools {
+		tools[i].Annotations = readOnlyHint
+	}
+	return tools
 }

@@ -125,3 +125,20 @@ func TestNotificationsAndUnknownMethod(t *testing.T) {
 		t.Fatal("instructions vides : champ absent attendu")
 	}
 }
+
+func TestToolsListAnnotations(t *testing.T) {
+	s := NewServer("srv", "1", "")
+	s.Register(
+		Tool{Name: "lire", Annotations: map[string]any{"readOnlyHint": true}},
+		Tool{Name: "brut"},
+	)
+	got := run(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	tools := got["1"]["result"].(map[string]any)["tools"].([]any)
+	lire, brut := tools[0].(map[string]any), tools[1].(map[string]any)
+	if ann, ok := lire["annotations"].(map[string]any); !ok || ann["readOnlyHint"] != true {
+		t.Fatalf("annotations de lire : %v", lire)
+	}
+	if _, ok := brut["annotations"]; ok {
+		t.Fatalf("annotations vides : champ absent attendu, obtenu %v", brut)
+	}
+}

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,16 +29,27 @@ func toJSON(v any) (string, error) {
 	return string(b), err
 }
 
-// GenericTools renvoie les outils de recherche, description et appel des
-// opérations du catalogue. filesDir est le seul dossier dans lequel le
-// serveur lit (envoi) et écrit (save_to, téléchargements) des fichiers.
-func GenericTools(c *xalantis.Client, cat *openapi.Catalog, filesDir string) []mcp.Tool {
+// GenericTools renvoie les outils de recherche, description, lecture et
+// écriture des opérations du catalogue. filesDir est le seul dossier dans
+// lequel le serveur lit (envoi) et écrit (save_to, téléchargements) des
+// fichiers. readOnly retire l'outil d'écriture et limite la recherche aux GET.
+func GenericTools(c *xalantis.Client, cat *openapi.Catalog, filesDir string, readOnly bool) []mcp.Tool {
 	areas := make([]any, len(openapi.Areas))
 	for i, a := range openapi.Areas {
 		areas[i] = a
 	}
+	next, listMethod := "xalantis_read_operation (GET) ou xalantis_call_operation (écritures)", ""
+	if readOnly {
+		next, listMethod = "xalantis_read_operation (écritures désactivées)", "GET"
+	}
 	opID := map[string]any{"operation_id": prop("string", "operation_id renvoyé par xalantis_search_operations.")}
-	return []mcp.Tool{
+	readProps := merge(opID, map[string]any{
+		"path_params": map[string]any{"type": "object", "description": "Paramètres de chemin, ex. {\"projectUuid\": \"…\"}."},
+		"query":       map[string]any{"type": "object", "description": "Paramètres de requête. Tableau = valeurs répétées (nom[]), objet = nom[clé]."},
+		"headers":     map[string]any{"type": "object", "description": "En-têtes déclarés par l'opération."},
+		"save_to":     prop("string", "Chemin où enregistrer la réponse (fichier ou texte, ex. un export CSV), dans le dossier autorisé (XALANTIS_FILES_DIR ; chemin relatif = relatif à ce dossier). Sans save_to, les fichiers reçus sont enregistrés dans ce dossier et le texte est renvoyé directement."),
+	})
+	tools := []mcp.Tool{
 		{
 			Name: "xalantis_search_operations",
 			Description: "Étape 1/3 pour toute opération Xalantis sans outil dédié (projets, tickets, SLA, catalogue…). " +
@@ -48,11 +60,18 @@ func GenericTools(c *xalantis.Client, cat *openapi.Catalog, filesDir string) []m
 				"area":   map[string]any{"type": "string", "enum": areas, "description": "Domaine fonctionnel."},
 				"method": map[string]any{"type": "string", "enum": []any{"GET", "POST", "PUT", "PATCH", "DELETE"}, "description": "Méthode HTTP."},
 			}),
+			Annotations: readOnlyHint,
 			Handler: func(raw map[string]any) (string, error) {
 				a := args(raw)
 				query, area, method := a.str("query"), a.str("area"), a.str("method")
 				if query == "" && area == "" && method == "" {
-					return toJSON(map[string]any{"areas": cat.AreaCounts()})
+					return toJSON(map[string]any{"areas": cat.AreaCounts(listMethod)})
+				}
+				if readOnly {
+					if method != "" && !strings.EqualFold(method, "GET") {
+						return toJSON(map[string]any{"count": 0, "operations": []openapi.Summary{}})
+					}
+					method = "GET"
 				}
 				res := cat.Search(query, area, method)
 				return toJSON(map[string]any{"count": len(res), "operations": res})
@@ -61,8 +80,9 @@ func GenericTools(c *xalantis.Client, cat *openapi.Catalog, filesDir string) []m
 		{
 			Name: "xalantis_describe_operation",
 			Description: "Étape 2/3 : paramètres (chemin, requête, en-têtes) et schéma du corps d'une opération Xalantis. " +
-				"Ensuite : xalantis_call_operation.",
+				"Ensuite : " + next + ".",
 			InputSchema: schema([]string{"operation_id"}, opID),
+			Annotations: readOnlyHint,
 			Handler: func(raw map[string]any) (string, error) {
 				d, err := cat.Describe(args(raw).str("operation_id"))
 				if err != nil {
@@ -72,23 +92,62 @@ func GenericTools(c *xalantis.Client, cat *openapi.Catalog, filesDir string) []m
 			},
 		},
 		{
-			Name: "xalantis_call_operation",
-			Description: "Étape 3/3 : exécute une opération Xalantis décrite par xalantis_describe_operation. " +
-				"Peut créer, modifier ou supprimer des données selon les scopes de la clé API. " +
-				"Les fichiers envoyés sont des chemins locaux ; les fichiers reçus sont enregistrés localement.",
-			InputSchema: schema([]string{"operation_id"}, merge(opID, map[string]any{
-				"path_params": map[string]any{"type": "object", "description": "Paramètres de chemin, ex. {\"projectUuid\": \"…\"}."},
-				"query":       map[string]any{"type": "object", "description": "Paramètres de requête. Tableau = valeurs répétées (nom[]), objet = nom[clé]."},
-				"headers":     map[string]any{"type": "object", "description": "En-têtes déclarés par l'opération (Idempotency-Key, If-Match)."},
-				"body":        map[string]any{"type": "object", "description": "Corps JSON, ou champs texte pour une opération multipart."},
-				"files":       map[string]any{"type": "object", "description": "Opérations multipart : champ → chemin ou liste de chemins, dans le dossier autorisé (XALANTIS_FILES_DIR ; chemin relatif = relatif à ce dossier)."},
-				"save_to":     prop("string", "Chemin où enregistrer la réponse (fichier ou texte, ex. un export CSV), dans le dossier autorisé (XALANTIS_FILES_DIR ; chemin relatif = relatif à ce dossier). Sans save_to, les fichiers reçus sont enregistrés dans ce dossier et le texte est renvoyé directement."),
-			})),
+			Name: "xalantis_read_operation",
+			Description: "Étape 3/3 pour une lecture : exécute une opération GET décrite par xalantis_describe_operation. " +
+				"Ne modifie aucune donnée. Les fichiers reçus sont enregistrés localement.",
+			InputSchema: schema([]string{"operation_id"}, readProps),
+			Annotations: readOnlyHint,
 			Handler: func(raw map[string]any) (string, error) {
-				return callOperation(c, cat, filesDir, args(raw))
+				a := args(raw)
+				if err := checkMethod(cat, a.str("operation_id"), true, readOnly); err != nil {
+					return "", err
+				}
+				return callOperation(c, cat, filesDir, a)
 			},
 		},
 	}
+	if readOnly {
+		return tools
+	}
+	return append(tools, mcp.Tool{
+		Name: "xalantis_call_operation",
+		Description: "Étape 3/3 pour une écriture : exécute une opération POST, PUT, PATCH ou DELETE décrite par xalantis_describe_operation. " +
+			"Peut créer, modifier ou supprimer des données selon les scopes de la clé API. " +
+			"Les fichiers envoyés sont des chemins locaux ; les fichiers reçus sont enregistrés localement.",
+		InputSchema: schema([]string{"operation_id"}, merge(readProps, map[string]any{
+			"headers": map[string]any{"type": "object", "description": "En-têtes déclarés par l'opération (If-Match ; Idempotency-Key est générée si absente)."},
+			"body":    map[string]any{"type": "object", "description": "Corps JSON, ou champs texte pour une opération multipart."},
+			"files":   map[string]any{"type": "object", "description": "Opérations multipart : champ → chemin ou liste de chemins, dans le dossier autorisé (XALANTIS_FILES_DIR ; chemin relatif = relatif à ce dossier)."},
+		})),
+		Annotations: destructiveHint,
+		Handler: func(raw map[string]any) (string, error) {
+			a := args(raw)
+			if err := checkMethod(cat, a.str("operation_id"), false, readOnly); err != nil {
+				return "", err
+			}
+			return callOperation(c, cat, filesDir, a)
+		},
+	})
+}
+
+// checkMethod refuse une opération qui ne correspond pas à l'outil : read
+// n'accepte que GET, l'outil d'écriture tout sauf GET. Une opération inconnue
+// passe : callOperation renvoie alors l'erreur « opération inconnue ».
+func checkMethod(cat *openapi.Catalog, id string, read, readOnly bool) error {
+	op, ok := cat.Get(id)
+	if !ok {
+		return nil
+	}
+	isGet := op.Method == "GET"
+	switch {
+	case read && !isGet && readOnly:
+		return errors.New("écriture désactivée (XALANTIS_READ_ONLY)")
+	case read && !isGet:
+		return errors.New("opération d'écriture : utilisez xalantis_call_operation")
+	case !read && isGet:
+		return errors.New("lecture : utilisez xalantis_read_operation")
+	}
+	return nil
 }
 
 func callOperation(c *xalantis.Client, cat *openapi.Catalog, filesDir string, a args) (string, error) {
@@ -126,7 +185,7 @@ func callOperation(c *xalantis.Client, cat *openapi.Catalog, filesDir string, a 
 	if err != nil {
 		return "", err
 	}
-	headers, err := buildHeaders(op, headerArgs)
+	headers, generatedKey, err := buildHeaders(op, headerArgs)
 	if err != nil {
 		return "", err
 	}
@@ -182,6 +241,9 @@ func callOperation(c *xalantis.Client, cat *openapi.Catalog, filesDir string, a 
 
 	resp, err := c.Do(op.Method, path, query, headers, reader, contentType)
 	if err != nil {
+		if generatedKey != "" {
+			return "", fmt.Errorf("%w (Idempotency-Key générée : %s — réutilisez-la pour relancer la même requête ; si le corps change, omettez-la)", err, generatedKey)
+		}
 		return "", err
 	}
 	if len(resp.Body) == 0 {
@@ -257,7 +319,10 @@ func buildQuery(op *openapi.Operation, values map[string]any) (url.Values, error
 	return q, nil
 }
 
-func buildHeaders(op *openapi.Operation, values map[string]any) (map[string]string, error) {
+// buildHeaders valide les en-têtes fournis. Si l'opération déclare
+// Idempotency-Key et qu'aucune valeur n'est fournie, une clé est générée et
+// renvoyée en second résultat ("" sinon).
+func buildHeaders(op *openapi.Operation, values map[string]any) (map[string]string, string, error) {
 	h := map[string]string{}
 	for k, v := range values {
 		var name string
@@ -267,22 +332,38 @@ func buildHeaders(op *openapi.Operation, values map[string]any) (map[string]stri
 			}
 		}
 		if name == "" {
-			return nil, fmt.Errorf("en-tête non autorisé pour %s : %s", op.ID, k)
+			return nil, "", fmt.Errorf("en-tête non autorisé pour %s : %s", op.ID, k)
 		}
 		s, err := scalar(name, v)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if strings.TrimSpace(s) != "" {
 			h[name] = strings.TrimSpace(s)
 		}
 	}
+	generated := ""
 	for _, p := range op.Params {
-		if p.In == "header" && p.Required && h[p.Name] == "" {
-			return nil, fmt.Errorf("en-tête requis manquant : %s (valeur unique par mutation, ex. un UUID)", p.Name)
+		if p.In == "header" && strings.EqualFold(p.Name, "Idempotency-Key") && h[p.Name] == "" {
+			generated = newUUID()
+			h[p.Name] = generated
 		}
 	}
-	return h, nil
+	for _, p := range op.Params {
+		if p.In == "header" && p.Required && h[p.Name] == "" {
+			return nil, "", fmt.Errorf("en-tête requis manquant : %s", p.Name)
+		}
+	}
+	return h, generated, nil
+}
+
+// newUUID renvoie un UUID v4 aléatoire (RFC 9562).
+func newUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:]) // depuis Go 1.24, ne renvoie jamais d'erreur (le programme s'arrête en cas d'échec)
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
 func buildFiles(op *openapi.Operation, filesDir string, values map[string]any) ([]xalantis.FilePart, error) {

@@ -27,7 +27,7 @@ func TestLoadFiltersAreas(t *testing.T) {
 		"Disponibilité des agents": 2, "Catalogue de services": 3, "Administration du catalogue": 6,
 	}
 	got := map[string]int{}
-	for _, a := range c.AreaCounts() {
+	for _, a := range c.AreaCounts("") {
 		got[a.Area] = a.Operations
 	}
 	for area, n := range want {
@@ -122,6 +122,21 @@ func TestDescribe(t *testing.T) {
 	get, _ := c.Describe("get_tickets")
 	if get.Body != nil {
 		t.Errorf("GET sans corps : %v", get.Body)
+	}
+}
+
+func TestAreaCountsByMethod(t *testing.T) {
+	c := loadEmbedded(t)
+	got, total := map[string]int{}, 0
+	for _, a := range c.AreaCounts("get") {
+		got[a.Area] = a.Operations
+		total += a.Operations
+	}
+	if got["Projets et tâches"] != 38 || got["Tickets"] != 17 || total != 67 {
+		t.Errorf("GET : %v (total %d), attendu 38 / 17 / 67", got, total)
+	}
+	if n := len(c.AreaCounts("TRACE")); n != 0 {
+		t.Errorf("méthode absente : %d domaines, attendu 0", n)
 	}
 }
 
