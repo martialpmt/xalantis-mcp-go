@@ -17,11 +17,11 @@ func loadEmbedded(t *testing.T) *Catalog {
 
 func TestLoadFiltersAreas(t *testing.T) {
 	c := loadEmbedded(t)
-	if c.Len() != 206 {
-		t.Fatalf("Len = %d, attendu 206", c.Len())
+	if c.Len() != 207 {
+		t.Fatalf("Len = %d, attendu 207", c.Len())
 	}
 	want := map[string]int{
-		"Projets et tâches": 108, "Tickets": 57, "Automatisations de tickets": 8,
+		"Projets et tâches": 108, "Tickets": 58, "Automatisations de tickets": 8,
 		"Catégories de tickets": 4, "Tags de tickets": 5, "Politiques SLA": 4,
 		"Violations SLA": 2, "Politiques d’escalade": 3, "Réponses prédéfinies": 4,
 		"Disponibilité des agents": 2, "Catalogue de services": 3, "Administration du catalogue": 6,
