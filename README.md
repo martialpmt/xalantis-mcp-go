@@ -3,7 +3,7 @@
 [![CI](https://github.com/martialpmt/xalantis-mcp-go/actions/workflows/ci.yml/badge.svg)](https://github.com/martialpmt/xalantis-mcp-go/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/martialpmt/xalantis-mcp-go.svg)](https://pkg.go.dev/github.com/martialpmt/xalantis-mcp-go)
 
-Serveur MCP local (stdio) pour l'API Xalantis. Il couvre 206 opérations :
+Serveur MCP local (stdio) pour l'API Xalantis. Il couvre 207 opérations :
 projets et tâches, service desk (tickets, automatisations, catégories, tags,
 SLA, escalades, réponses prédéfinies, disponibilité des agents) et catalogue
 de services. Il complète le connecteur Xalantis existant.
