@@ -154,16 +154,18 @@ check(any(o["operation_id"] == "post_projects_By_projectUuid_tasks" for o in r11
 r12 = json.loads(resp[12]["result"]["content"][0]["text"])
 check(r12["method"] == "POST" and r12["body"]["content_type"] == "application/json"
       and any(p["name"] == "Idempotency-Key" and p["required"] for p in r12["parameters"]), "describe_operation")
+# Les appels sont servis en parallèle : retrouver chaque POST par son corps, pas par son rang.
+post_by_title = {(p["body"] or {}).get("title"): p for p in POSTS}
 r13 = json.loads(resp[13]["result"]["content"][0]["text"])
-check(r13["data"]["uuid"] == "tk-1" and POSTS and POSTS[0] == {
+check(r13["data"]["uuid"] == "tk-1" and post_by_title.get("Nouvelle tâche") == {
     "path": "/api/v1/projects/p-1/tasks", "idem": "idem-42", "type": "application/json",
     "body": {"title": "Nouvelle tâche"}}, "call_operation POST JSON")
 r14 = json.loads(resp[14]["result"]["content"][0]["text"])
 saved = os.path.join(home, "Downloads", "xalantis", "rapport.pdf")
 check(r14["saved_to"] == saved and open(saved, "rb").read() == b"%PDF-test", "read_operation téléchargement")
 check(not resp[15]["result"]["isError"] and len(POSTS) == 2
-      and re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", POSTS[1]["idem"] or "")
-      and POSTS[1]["body"] == {"title": "sans clé"}, "Idempotency-Key générée")
+      and re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                      post_by_title.get("sans clé", {}).get("idem") or ""), "Idempotency-Key générée")
 check(resp[16]["result"]["isError"] and "xalantis_call_operation" in resp[16]["result"]["content"][0]["text"],
       "read_operation refuse une écriture")
 check(all(a == "Bearer sk_live_test" for _, a in REQUESTS), "header Authorization sur chaque appel")
